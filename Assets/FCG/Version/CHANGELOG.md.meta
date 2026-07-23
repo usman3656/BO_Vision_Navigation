@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: f1e6b91f75a96514a94ec2b79d8003a1
+TextScriptImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 157625
+  packageName: Fantastic City Generator
+  packageVersion: 3.5.2
+  assetPath: Assets/FCG/Version/CHANGELOG.md
+  uploadId: 812122

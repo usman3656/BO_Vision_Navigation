@@ -115,3 +115,13 @@ Assets/FCG/
 /Assets/ArchVizPRO_Interior_Vol.7_URP.meta
 *.unitypackage
 *.unitypackage.meta
+
+# ViT-B-32 ONNX model (large, regenerate via MODEL_NOTES.md)
+/Assets/RouteNavigation/Models/*.onnx
+/Assets/RouteNavigation/Models/*.onnx.data
+
+# Bundled Python installers (large, regenerable, not needed in the repo)
+Assets/StreamingAssets/BOData/Installation/**/*.pkg
+Assets/StreamingAssets/BOData/Installation/**/*.pkg.meta
+Assets/StreamingAssets/BOData/Installation/**/*.exe
+Assets/StreamingAssets/BOData/Installation/**/*.exe.meta

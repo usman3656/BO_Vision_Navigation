@@ -1,61 +1,57 @@
 # PROGRESS
 
-Living status log. Pairs with CONTEXT.md (background) and SCOPE.md (plan). Dates are absolute.
+Living status log. Updated 2026-07-31 after the supervisor meeting, which changed the design. Pairs with CONTEXT.md and SCOPE.md.
 
 Legend: [x] done, [~] in progress, [ ] not started.
 
-## Done (as of 2026-07-23)
+## Design change (2026-07-31)
 
-- [x] Unity 6000.5 URP project created: BO_Vision_Navigation.
-- [x] Indoor environment imported and rendering: ArchVizPRO Interior Vol.7 URP.
-- [x] FCG assets imported (outdoor stand in).
-- [x] Input handling set to Both; older conflicting asset volumes removed; scene runs.
-- [x] Git repository cleaned (large assets excluded) and pushed to usman3656/BO_Vision_Navigation.
-- [x] Python 3.13.7 (arm64) installed with torch 2.13.0, botorch 0.18.1, gpytorch, open_clip 3.3.0. GPU (mps) available. All imports verified.
-- [x] ViT-B-32 and ViT-g-14 confirmed available in open_clip (using ViT-B-32 only for now).
-- [x] BO for Unity framework v1.5.0 obtained; example scene ran standalone, confirming the Unity to Python to BoTorch socket loop and CSV logging.
-- [x] Framework merged into the URP project (BOforUnity, QuestionnaireToolkit, StreamingAssets, TextMesh Pro). Newtonsoft JSON package added; BOforUnityManager tag added. Zero compile errors. Confirmed running inside the merged project (system started successfully).
-- [x] Removed an early standalone Python embedding folder because it violated the everything on Unity rule. Verified clean.
-- [x] engineering_rules.md placed in the project; documentation set (CONTEXT, SCOPE, PROGRESS) created.
+The supervisor clarified the project. It is NOT about a vision model scoring how natural a route is. It is about optimizing the VISUAL DESIGN of a VR wayfinding path (color, width, height, chevrons, animation), rated by humans in VR, with the vision model used only to embed each environment for the transfer test. See CONTEXT.md and SCOPE.md.
 
-## Phase 2 done (2026-07-23)
+Consequence for what we built:
+- Keep: Unity project, BO framework running, ViT-B-32 in Unity, NavMesh path tooling.
+- Superseded: the ViT smoothness and walkability route scorer (RouteVisualScorer) and waypoint-position optimization (RouteEvaluator). Route quality is now human-rated, and the design parameters are the path's appearance. These scripts will be reworked or removed.
 
-- [x] Documentation set created and verified.
-- [x] Supervisor decision received: route score is VISUAL (ViT model judges what the route looks like), not geometric.
-- [x] Architecture chosen and researched: run ViT-B-32 inside Unity via the Inference Engine (Sentis), not the Python backend. Keeps everything on Unity.
-- [x] De-risked: exported ViT-B-32 vision tower to a Sentis-compatible ONNX (opset 15, primitive ops, self-contained 335 MB), output matches PyTorch. Model, precomputed affordance text embeddings, and MODEL_NOTES.md placed in Assets/RouteNavigation/Models/ (model gitignored).
-- [x] Route builder written and verified: Assets/RouteNavigation/Scripts/RouteEvaluator.cs (reads waypoint parameters, builds a valid NavMesh route, submits the objective the framework's way). Its score is a placeholder, to be replaced by the visual scorer.
+## Done
 
-## Next steps (Phase 2 continued)
+- [x] Unity 6000.5 URP project, ArchViz Vol.7 and FCG imported.
+- [x] Repo cleaned and pushed (usman3656/BO_Vision_Navigation).
+- [x] Python 3.13 with torch, botorch, gpytorch, open_clip. GPU verified.
+- [x] BO for Unity v1.5.0 merged and running end to end (demo loop confirmed).
+- [x] ViT-B-32 exported and loading inside Unity (Inference Engine).
+- [x] NavMesh path tooling built; a walkable route works in the indoor scene.
+- [x] Documentation set created, and updated after the meeting.
 
-Owner: AUTO means the assistant writes or edits files; BAWANI means the Unity editor or a decision.
+## Not yet run
 
-1. [ ] Visual scorer script: capture views along the route, run ViT-B-32 in the Inference Engine, compute the score (visual coherence plus walkability affordance), replace the placeholder. Owner: AUTO (verify exact Inference Engine 2.6 API first).
-2. [ ] Import the ONNX model into Unity and confirm the Inference Engine loads it. Owner: BAWANI (drag model into the editor, assistant guides).
-3. [ ] Bake a NavMesh on the apartment scene. Owner: BAWANI (assistant can prepare a helper).
-4. [ ] Place start and goal markers (bed, kitchen), add a capture camera. Owner: BAWANI, assistant guides.
-5. [ ] Configure the BO manager parameters and the objective; set advance mode to automatic. Owner: AUTO config, BAWANI presses Play.
-6. [ ] Run on the indoor environment, collect the convergence curve. Owner: BAWANI runs, AUTO analyses logs.
+- The scored optimization loop has never run on a real task. No Pareto front and no participant data yet.
 
-## Later phases (unchanged)
+## Next steps (from the meeting; owner does Unity, assistant supports)
 
-- Per-environment context embedding for transfer, run the outdoor environment, compare environments, transfer test on an unknown environment, final in-scene direction markers.
+1. [ ] Confirm the three environments. Re-check the German files and re-import the deleted volumes if they are the two indoor rooms. Owner.
+2. [ ] Fix one start point per environment.
+3. [ ] Capture one clean wide-angle start image per environment, facing the walk direction, with no overlay.
+4. [ ] Embed the three images with ViT-B-32; pick the two furthest apart.
+5. [ ] Decide hex vs RGB for color, and finalize the six parameters.
+6. [ ] Build the visual path renderer driven by the six normalized parameters.
+7. [ ] Add speed measurement and the in-VR aesthetic questionnaire (1 to 20).
+8. [ ] Set up multi-objective BO with Sobol sampling; iteration budget about 19.
+9. [ ] Self-test the full loop in VR (headset from the supervisor) before participants.
+10. [ ] Optimize in the two chosen environments; produce a Pareto front each.
+11. [ ] Implement transfer for the third environment: closest vs interpolated, and compare.
 
-## Upcoming phases
+## Suggested order for the low-availability weeks
 
-- Phase 3: ViT embeddings as context in the contextual model, produced through the Unity backend.
-- Phase 4: run outdoor environment once supplied; produce its curve.
-- Phase 5: compare environments.
-- Phase 6: transfer test on an unknown environment.
-- Phase 7: final visualization, best route in 3D with in scene direction markers.
+Asset confirmation, then start images and embeddings, then finalize parameters and color encoding, then the path renderer and BO with Sobol, then a basic VR loop with questionnaire output. Leave participant sessions until after the dissertation crunch.
 
 ## Blockers and risks
 
-- Route score definition is unconfirmed; it gates steps 6 to 8.
-- Outdoor and unknown environments not yet provided.
-- FCG scene may need URP material conversion before it renders correctly.
+- The deleted indoor volumes may need re-importing from the German zip.
+- Hex color handling in the optimizer is unverified.
+- VR integration and the in-VR questionnaire are not started.
+- Owner availability is limited for about 2 to 3 weeks (dissertation).
 
-## What the owner does versus what is automated
+## What the owner does vs the assistant
 
-- Automated (assistant, by editing files): route parameterization, camera capture script, route score script, BO parameter and objective configuration, log analysis and plots, editor helper scripts.
-- Owner (Unity editor or decision): confirm the score definition, bake NavMesh, place start and goal, wire the camera, press Play, review visuals.
+- Owner (Unity and VR): asset confirmation, start points, image capture, path-renderer wiring, VR setup, running trials.
+- Assistant (files): parameter and objective configuration, Sobol and multi-objective setup guidance, the embedding step, the transfer logic, log analysis and plots.

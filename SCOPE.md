@@ -1,62 +1,73 @@
 # SCOPE
 
-The full plan for the project: what we are building, how, and what counts as done. Pairs with CONTEXT.md (background) and PROGRESS.md (status).
+The plan: what we build, how, and what counts as done. Updated 2026-07-31 after the supervisor meeting. Pairs with CONTEXT.md (background) and PROGRESS.md (status).
 
 ## 1. Objective
 
-Build a Unity system that finds the most natural human route between two points in an environment, using Bayesian Optimization guided by ViT visual embeddings, and evaluate how this transfers across environments.
+Use Bayesian Optimization to find the visual design of a VR wayfinding path (color, width, height, chevrons, animation) that participants rate as most aesthetic while walking fast, in two environments, and test whether the result transfers to a third unseen environment.
 
 ## 2. Research questions
 
-1. Can Bayesian Optimization, guided by ViT view embeddings, find routes that match how a person would naturally walk?
-2. How does the optimization behave in an indoor environment versus an outdoor one (comparison of curves)?
-3. Do embeddings learned on known environments transfer to an unknown environment, so it finds good routes with little or no retraining?
+1. What path appearance best trades off walking speed against aesthetic rating in a given environment (the Pareto front)?
+2. For a new, unseen environment, does using the closest environment's result, or interpolating between two environments by embedding proximity, give the better path?
+3. Do a VLM's aesthetic ratings agree with human ratings on the same 1 to 20 scale?
 
-## 3. Method and pipeline
+## 3. Design parameters (about 6, all 0 to 1)
 
-1. Walkable area: bake a NavMesh in the environment so routes can only exist where a person can walk.
-2. Endpoints: place a start and a goal (example: bed and kitchen).
-3. Route parameters: describe a route as start, then a few waypoints, then goal. Waypoint coordinates are the parameters BO tunes.
-4. Views and embeddings: place a Unity camera at points along the route, render the views, and embed each with open_clip ViT-B-32 through the Unity driven backend.
-5. Route score: measure how natural or good the route is (definition is an open question, see section 6).
-6. Optimization: BoTorch proposes new waypoints, the route is rescored, and it converges to the best route. Embeddings enter as context in the contextual model (LCEMGP).
-7. Comparison: plot best route quality against iteration for indoor, then outdoor, and compare.
-8. Transfer: apply the learned embeddings to an unknown environment and measure whether it still finds good routes.
+1. Color (hex as one parameter if compatible, otherwise RGB as three).
+2. Width (0 minimal, 1 maximum).
+3. Height above the floor (0 on the floor, 1 about 2 to 3 m up).
+4. Chevrons on or off.
+5. Animation or movement (optional, to confirm).
+6. One further visual parameter, to be decided.
 
-## 4. Deliverables
+Keep the count small. Each parameter raises the iteration budget in section 7.
 
-- A Unity scene per environment with NavMesh, endpoints, and the optimization wired in.
-- Route parameterization, camera capture, and route scoring, all inside Unity.
-- ViT embeddings produced through the Unity backend.
-- Logged results (CSV) and convergence curves per environment plus a comparison.
-- Transfer test result on an unknown environment.
-- Final visualization: the best route drawn in the 3D scene with in scene direction markers, so that from a given spot the user sees markers pointing along the best path.
+## 4. Objectives
 
-## 5. Environments
+- Walking speed: measured while the participant walks. Not optimized directly, but recorded as an objective.
+- Aesthetics: rated by the participant in VR on a 1 to 20 scale, and optionally by a VLM on the same scale.
 
-- Indoor: ArchVizPRO Interior Vol.7 URP (available now).
-- Outdoor: to be supplied by the supervisor later; FCG assets are present as a stand in.
-- Unknown: a further environment used only for the transfer test.
+Multi-objective, producing a Pareto front (speed vs aesthetics) per environment.
 
-## 6. Open questions to confirm with supervisor
+## 5. Method and pipeline
 
-1. Definition of best or natural route. Options: the owner rates each candidate route (human in the loop, the framework supports this), an automatic score (short, smooth, on the walkable area, visually sensible using embeddings), or a mix. This choice shapes the scoring and the transfer test, so confirm before finalising.
-2. Which outdoor environment and which unknown environment will be used.
+1. Confirm three environments: two indoor, one outdoor (Fantastic City). Re-check the German files; the deleted volumes may be the indoor rooms.
+2. Fix one start point per environment.
+3. Capture one wide-angle image at each start marker, facing the walk direction, with no overlay.
+4. Embed the three images with ViT-B-32, and find the two furthest apart. Optimize on those two; the third is the transfer target.
+5. Build the visual path renderer driven by the six normalized parameters.
+6. In VR, the participant walks the path. Record walking speed, and show a questionnaire for the aesthetic rating.
+7. Run BO with Sobol initial sampling, multi-objective, producing a Pareto front per environment. Iterations 2(d+1)+5, about 19 for 6 parameters.
+8. Transfer: for the third environment, compare using the closest Pareto front against the interpolated one.
 
-## 7. Success criteria
+## 6. Environments
 
-- The optimizer runs end to end in Unity for the indoor environment and produces a converging curve.
-- The chosen route score reflects natural routes in a way the supervisor accepts.
-- The comparison across environments is produced and readable.
-- The transfer test gives a clear yes or no on whether embeddings help on an unknown environment.
-- The best route is shown in the 3D scene with working direction markers.
+- Two indoor (different rooms or houses). Re-import the deleted ArchViz volumes if they are the needed rooms.
+- One outdoor: Fantastic City.
+- A held-out third environment for the transfer test.
 
-## 8. Out of scope for now
+## 7. Deliverables
 
-- ViT-g-14 (deferred; ViT-B-32 only).
-- Any pipeline that runs outside Unity.
-- The outdoor and unknown environments until the supervisor provides them.
+- A Unity plus VR scene per environment with the path renderer, speed logging, and the in-VR questionnaire.
+- Three environment embeddings and the furthest-apart pair identified.
+- A Pareto front per optimized environment.
+- The transfer comparison in the third environment (closest vs interpolated) as the main result, with convergence curves as supporting evidence.
+- Optional: a comparison of VLM against human aesthetic ratings.
 
-## 9. References
+## 8. Constraints and notes
+
+- ViT-B-32 only for now.
+- Sobol sampling, not random.
+- Counterbalance the environment order across participants.
+- The owner has limited availability for about 2 to 3 weeks (dissertation deadline). Prioritize setup that does not need participants: asset confirmation, embeddings, parameter definition, and the Unity plus VR implementation.
+
+## 9. Open items to confirm
+
+1. Hex color as one parameter, or RGB as three. Verify hex handling in the optimizer.
+2. The sixth parameter, and whether animation is included.
+3. Whether the deleted ArchViz volumes are the two indoor environments.
+
+## 10. References
 
 See CONTEXT.md section 10.

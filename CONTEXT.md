@@ -1,75 +1,79 @@
 # CONTEXT
 
-Full working context for the BO_Vision_Navigation project. Read this first to understand what the project is, how it is built, and where it stands.
+Full working context. Read this first. Updated 2026-07-31 after the supervisor meeting, which changed the design.
 
 ## 1. One line
 
-Find the most natural human route between two points in a Unity environment using Bayesian Optimization guided by ViT visual embeddings, compare environments, then test whether the learned embeddings transfer to an unseen environment.
+Use Bayesian Optimization to find the visual design of a VR wayfinding path (its color, width, height, chevrons, animation) that participants rate as most aesthetic while letting them walk fast. Do this in two environments, then test whether the result transfers to a third, unseen environment. A ViT embedding of each environment is the context that drives the transfer.
 
-## 2. People and framing
+## 2. People
 
-- Owner: MR BAWANI (UCL masters project).
-- Supervisor gives the assets and the environments (indoor now, outdoor later) and defines the study intent.
-- Beginner in Unity, machine learning, and Bayesian Optimization, so the build is incremental and each step is verified.
+- Owner: MR BAWANI, MSc Emerging Digital Technologies, University College London.
+- Supervisor: Professor Mark Colley. Provides the assets and a VR headset, and defines the study.
+- Beginner in Unity, machine learning, and Bayesian Optimization, so builds are incremental and verified.
 
-## 3. Research goal
+## 3. What we are really doing (corrected design)
 
-Given a start and a goal in an environment (example: bed to kitchen), find the route a person would naturally walk, not just the shortest line. Do this indoors first, outdoors later, compare the two, then test on an unknown environment to see whether the ViT embeddings still work (transfer). The ViT embedding is the visual context that makes cross environment transfer possible. This is why the supervisor specified the contextual BO variant.
+A user in VR walks a fixed route from a start to a goal, guided by a visual path, like an arrow or line laid over the floor. We use Bayesian Optimization to find the path appearance that participants rate as most aesthetic while still walking quickly. We do this in two environments, then test whether we can predict a good path for a third, unseen environment, either by reusing the closest environment's result or by interpolating between the two.
+
+Correction from the supervisor: the vision model does NOT judge route quality. It only produces one embedding per environment, the environment fingerprint, which feeds the contextual model for transfer. Humans rate the paths in VR. Optionally a VLM also rates them on the same 1 to 20 scale, so VLM and human judgment can be compared.
 
 ## 4. Method in brief
 
-- The route is described by a small number of waypoints. Their coordinates are the parameters the optimizer tunes.
-- Bayesian Optimization (BoTorch) proposes waypoint sets, the route quality is scored, and the optimizer converges to the best route.
-- At points along the route a Unity camera renders the view, and open_clip ViT-B-32 turns each view into an embedding vector. These embeddings act as the context in a contextual multi task Gaussian Process (BoTorch LCEMGP).
-- Two environments become two contexts, which lets the model share learning and later generalise to an unknown environment.
-- Outputs are convergence curves per environment and a comparison, plus the transfer test.
+- Design parameters (about 6, all 0 to 1): the path's color, width, height above the floor, chevrons on or off, animation, and one more to be decided. Keep the count small, since more parameters means more iterations.
+- Objectives (multi-objective): walking speed (measured) and aesthetics (rated by the participant in VR, scale 1 to 20). The optimizer produces a Pareto front per environment, the tradeoff between speed and aesthetics.
+- Sampling: Sobol for the initial exploration (even spacing), then optimization rounds. Iterations follow 2(d+1) + 5, about 19 for 6 parameters.
+- Environment embedding: one wide-angle image captured at the fixed start marker, facing the walk direction, with NO overlay (no path line, markers, or gizmos). ViT-B-32 embeds it. Three environments give three embeddings; the two furthest apart are the ones to optimize on.
+- Transfer: for the third environment, either use the closest environment's Pareto front, or interpolate between the two based on embedding proximity. The research question is which of these works better.
 
-## 5. Architecture and stack
+## 5. Environments (3 total)
 
-- Unity 6000.5 (editor 6000.5.4f1), Universal Render Pipeline (URP).
-- Bayesian Optimization for Unity, Pascal Jansen framework v1.5.0. Unity launches a Python backend and talks to it over a local socket. BoTorch does the optimization. v1.5.0 already supports image based context embeddings via open_clip, so embeddings run inside this Unity driven pipeline.
-- Python 3.13.7 (Apple Silicon arm64) at `/Library/Frameworks/Python.framework/Versions/3.13/bin/python3`, with torch 2.13.0, botorch 0.18.1, gpytorch, open_clip 3.3.0. GPU acceleration is available (Metal, mps).
-- NavMesh (com.unity.ai.navigation) is already in the project and will define walkable area for routes.
+- Two indoor (different rooms or houses). The deleted ArchViz volumes (Vol.2, Vol.6) may be these; re-check the files from Germany and re-import.
+- One outdoor: Fantastic City (FCG), confirmed.
+- A fixed start point per environment.
 
-## 6. Repository layout (key items)
+## 6. Architecture and stack
 
-- `Assets/ArchVizPRO_Interior_Vol.7_URP/` indoor environment (URP, renders correctly).
-- `Assets/FCG/` Fantastic City Generator assets (outdoor style; the supervisor will supply the final outdoor environment later).
-- `Assets/BOforUnity/` the optimization engine, scenes, prefabs, scripts (merged in from the framework).
-- `Assets/QuestionnaireToolkit/` supports human rating mode if used.
-- `Assets/StreamingAssets/BOData/` the Python backend, installer, and log output.
-- `Assets/TextMesh Pro/` UI text support needed by the toolkit.
-- `engineering_rules.md` binding project rules (see below).
-- `CONTEXT.md`, `SCOPE.md`, `PROGRESS.md` this documentation set.
+- Unity 6000.5 URP, plus VR (headset provided by the supervisor).
+- BO for Unity (Pascal Jansen v1.5.0): Unity launches a Python BoTorch backend over a socket. It supports multi-objective (mobo), Sobol sampling, questionnaire input, and per-environment image context embeddings via open_clip.
+- Python 3.13.7 (Apple Silicon arm64), torch 2.13.0, botorch 0.18.1, gpytorch, open_clip 3.3.0, GPU (Metal, mps).
+- ViT-B-32 also exported to run inside Unity via the Inference Engine (Assets/RouteNavigation/Models), available if we prefer in-engine embedding over the Python side.
+- NavMesh (com.unity.ai.navigation) defines the fixed walkable route the visual path follows.
 
-Large asset folders are excluded from git and kept local. GitHub remote: usman3656/BO_Vision_Navigation.
+## 7. What is built, and what changed
 
-## 7. Hard constraints
+Built and still useful:
+- Unity project, BO framework merged and running end to end (verified with the demo loop).
+- ViT-B-32 loads and runs inside Unity.
+- NavMesh path tooling (bake, test, markers) under Assets/RouteNavigation/Editor.
 
-- Everything runs inside Unity. No standalone side pipelines. Embeddings and results are produced and shown through the Unity driven flow.
-- ViT-B-32 only for now. The larger ViT-g-14 is deferred.
-- `engineering_rules.md` is absolute: address the owner as MR BAWANI, no em dashes, concise writing, research before building, parallel agents for real tasks, a separate verifier agent checks every change, token efficient model choices. New instructions get appended to that file and are equally binding.
+Superseded by the new design (to remove or rework):
+- The route quality scorer that judged smoothness and walkability with ViT (RouteVisualScorer). The vision model no longer scores routes.
+- Optimizing waypoint positions as the design parameters (RouteEvaluator). The design parameters are now the path's visual appearance, and the route itself is fixed.
 
-## 8. Key decisions made
+## 8. Hard constraints
 
-- Merge direction: the BO engine was merged into the existing URP project, not the reverse, because the framework project used the built in renderer while the environments and the working project are URP. This avoided a fragile render pipeline conversion.
-- Standalone Python embedding scripts were built early, then removed, because they violated the everything on Unity rule.
+- ViT-B-32 only for now.
+- engineering_rules.md is absolute: address the owner as MR BAWANI, no em dashes, concise writing, research before building, parallel agents for real tasks, a verifier agent checks every change, token-efficient model choices.
 
 ## 9. Glossary
 
-- Embedding: a list of numbers that represents an image, so that similar views give similar numbers.
-- ViT (Vision Transformer): the model (via open_clip) that produces the embedding.
-- Bayesian Optimization (BO): a method that finds the best settings of a few parameters using as few trials as possible.
-- BoTorch: the Python library that runs the BO.
-- LCEMGP: the contextual multi task model in BoTorch that lets context (the embeddings) transfer knowledge between environments.
-- NavMesh: Unity data describing where an agent can walk.
-- Convergence curve: best route quality plotted against optimization iteration.
+- Embedding: numbers representing an image, so that similar scenes give similar numbers. Here, one per environment.
+- ViT / open_clip: the model that produces the embedding.
+- Bayesian Optimization (BO): finds good settings in as few trials as possible.
+- Sobol sampling: an even, low-discrepancy way to choose the first trial points.
+- Objective: a measured outcome the optimizer cares about. Here, walking speed and aesthetics.
+- Pareto front: the set of best tradeoffs between two objectives, where no point is better on both.
+- Contextual model (LCEMGP): the BoTorch model that uses the per-environment embedding to relate environments and transfer.
+- Chevrons: the arrow marks along a wayfinding path.
+- VLM: a vision-language model that can rate an image, used here as an optional second judge alongside humans.
+- Transfer (closest vs interpolated): predicting a good path for a new environment by reusing the nearest environment's result, or by blending two based on embedding distance.
 
 ## 10. References
 
-- BO for Unity: https://github.com/Pascal-Jansen/Bayesian-Optimization-for-Unity (release v1.5.0)
+- Supervisor: Professor Mark Colley.
+- Meeting notes (Granola): https://notes.granola.ai/t/bc813e10-60bf-4992-8628-e622be6070fc-00demib2
+- BO for Unity: https://github.com/Pascal-Jansen/Bayesian-Optimization-for-Unity (v1.5.0)
 - Contextual model (LCEMGP): https://github.com/meta-pytorch/botorch/blob/main/botorch/models/contextual_multioutput.py
 - open_clip: https://github.com/mlfoundations/open_clip
-- Indoor asset: https://assetstore.unity.com/packages/3d/environments/urban/archvizpro-interior-vol-7-urp-226477
-- Outdoor style asset: https://assetstore.unity.com/packages/3d/environments/urban/fantastic-city-generator-157625
 - Study materials: https://cloudstore.uni-ulm.de/s/PdHmKdkSJ8qY7Zn

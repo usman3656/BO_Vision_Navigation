@@ -125,3 +125,14 @@ Assets/StreamingAssets/BOData/Installation/**/*.pkg
 Assets/StreamingAssets/BOData/Installation/**/*.pkg.meta
 Assets/StreamingAssets/BOData/Installation/**/*.exe
 Assets/StreamingAssets/BOData/Installation/**/*.exe.meta
+
+# All ArchVizPRO interior volumes (large; re-extract from exported_packages.unitypackage)
+/Assets/ArchVizPRO*/
+/Assets/ArchVizPRO*.meta
+
+/Assets/Fantastic City Generator/
+/Assets/Fantastic City Generator.meta
+
+# Unity crash-recovery scratch (local only)
+/Assets/_Recovery/
+/Assets/_Recovery.meta

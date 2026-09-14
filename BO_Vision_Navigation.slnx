@@ -1,9 +1,9 @@
 ﻿<Solution>
+  <Project Path="Assembly-CSharp.csproj" />
   <Project Path="QuestionnaireToolkit.Runtime.csproj" />
   <Project Path="QuestionnaireToolkit.MemberReflection.Reflection.Editor.csproj" />
-  <Project Path="Assembly-CSharp.csproj" />
-  <Project Path="QuestionnaireToolkit.Editor.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
+  <Project Path="QuestionnaireToolkit.Editor.csproj" />
   <Project Path="BOforUnity.Editor.csproj" />
   <Project Path="BOforUnity.Runtime.csproj" />
   <Project Path="QuestionnaireToolkit.MemberReflection.Controls.Editor.csproj" />

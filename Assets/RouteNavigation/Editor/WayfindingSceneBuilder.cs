@@ -53,9 +53,64 @@ namespace RouteNavigation.EditorTools
 
             Undo.RecordObject(go.transform, "Move " + markerName);
             go.transform.position = pos;
+            SnapToGround(go.transform);
             Selection.activeGameObject = go;
             EditorSceneManager.MarkAllScenesDirty();
-            Debug.Log($"[Build] {markerName} placed at {pos}. Fine-tune with the Move tool (W) if needed.");
+            Debug.Log($"[Build] {markerName} placed near the Scene view focus and snapped to the ground. " +
+                      "To fine-tune: move it in X/Z with the Move tool (W), then run 'Snap " + markerName + " to Ground' again.");
+        }
+
+        [MenuItem("Tools/BO Route/Snap PathStart to Ground")]
+        public static void SnapStart() => SnapNamed("PathStart");
+
+        [MenuItem("Tools/BO Route/Snap PathGoal to Ground")]
+        public static void SnapGoal() => SnapNamed("PathGoal");
+
+        private static void SnapNamed(string markerName)
+        {
+            var go = GameObject.Find(markerName);
+            if (go == null) { Debug.LogError($"[Build] No {markerName} in the scene yet. Set it first."); return; }
+            Undo.RecordObject(go.transform, "Snap " + markerName);
+            SnapToGround(go.transform);
+            Selection.activeGameObject = go;
+            EditorSceneManager.MarkAllScenesDirty();
+        }
+
+        /// <summary>Drops the marker straight down onto the floor. Uses a physics raycast if the floor has a
+        /// collider, otherwise falls back to the highest mesh surface directly beneath it (no collider needed).</summary>
+        private static void SnapToGround(Transform t)
+        {
+            Vector3 p = t.position;
+
+            // 1) Physics raycast down (works when the floor has a collider).
+            if (Physics.Raycast(p + Vector3.up * 100f, Vector3.down, out RaycastHit hit, 1000f))
+            {
+                p.y = hit.point.y;
+                t.position = p;
+                Debug.Log($"[Build] {t.name} snapped to the floor collider at y={p.y:F2}.");
+                return;
+            }
+
+            // 2) No collider: pick the highest mesh whose footprint is under this X/Z and whose top is at or below us.
+            float bestTop = float.NegativeInfinity;
+            foreach (var mr in Object.FindObjectsByType<MeshRenderer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                Bounds b = mr.bounds;
+                if (p.x < b.min.x || p.x > b.max.x || p.z < b.min.z || p.z > b.max.z) continue; // must be over it
+                if (b.max.y > p.y + 0.5f) continue;                                              // ignore things above us
+                if (b.max.y > bestTop) bestTop = b.max.y;
+            }
+
+            if (!float.IsNegativeInfinity(bestTop))
+            {
+                p.y = bestTop;
+                t.position = p;
+                Debug.Log($"[Build] {t.name} snapped to the nearest mesh surface at y={p.y:F2} (no collider; used mesh bounds).");
+            }
+            else
+            {
+                Debug.LogWarning($"[Build] {t.name}: no ground found beneath it. Move it over the floor in X/Z first, then snap again.");
+            }
         }
 
         [MenuItem("Tools/BO Route/Build Wayfinding Test Objects")]

@@ -50,6 +50,23 @@ namespace BOforUnity.Editor
         private SerializedProperty cabopEnableCostBudgetProp;
         private SerializedProperty cabopMaxCumulativeCostProp;
         private SerializedProperty cabopGroupCostsProp;
+        private SerializedProperty metaSourceDirProp;
+        private SerializedProperty metaRequireSourcesProp;
+        private SerializedProperty metaWeightModeProp;
+        private SerializedProperty metaRhoProp;
+        private SerializedProperty metaTargetWeightProp;
+        private SerializedProperty metaWarmupItersProp;
+        private SerializedProperty metaDecayStartIterProp;
+        private SerializedProperty metaDecayRateProp;
+        private SerializedProperty dboSpatialKernelProp;
+        private SerializedProperty dboAlphaParameterizationProp;
+        private SerializedProperty dboInitialAlphaProp;
+        private SerializedProperty dboExplorationRatioProp;
+        private SerializedProperty dboAcquisitionTimeOffsetProp;
+        private SerializedProperty dboValidationEveryProp;
+        private SerializedProperty dboValidationConfidenceProp;
+        private SerializedProperty dboValidationVisitedOnlyProp;
+        private SerializedProperty dboStationaryBaselineProp;
         private SerializedProperty contextualOptimizationProp;
         private SerializedProperty contextEmbeddingSourceProp;
         private SerializedProperty currentContextKeyProp;
@@ -129,6 +146,23 @@ namespace BOforUnity.Editor
             cabopEnableCostBudgetProp = serializedObject.FindProperty("cabopEnableCostBudget");
             cabopMaxCumulativeCostProp = serializedObject.FindProperty("cabopMaxCumulativeCost");
             cabopGroupCostsProp = serializedObject.FindProperty("cabopGroupCosts");
+            metaSourceDirProp = serializedObject.FindProperty("metaSourceDir");
+            metaRequireSourcesProp = serializedObject.FindProperty("metaRequireSources");
+            metaWeightModeProp = serializedObject.FindProperty("metaWeightMode");
+            metaRhoProp = serializedObject.FindProperty("metaRho");
+            metaTargetWeightProp = serializedObject.FindProperty("metaTargetWeight");
+            metaWarmupItersProp = serializedObject.FindProperty("metaWarmupIters");
+            metaDecayStartIterProp = serializedObject.FindProperty("metaDecayStartIter");
+            metaDecayRateProp = serializedObject.FindProperty("metaDecayRate");
+            dboSpatialKernelProp = serializedObject.FindProperty("dboSpatialKernel");
+            dboAlphaParameterizationProp = serializedObject.FindProperty("dboAlphaParameterization");
+            dboInitialAlphaProp = serializedObject.FindProperty("dboInitialAlpha");
+            dboExplorationRatioProp = serializedObject.FindProperty("dboExplorationRatio");
+            dboAcquisitionTimeOffsetProp = serializedObject.FindProperty("dboAcquisitionTimeOffset");
+            dboValidationEveryProp = serializedObject.FindProperty("dboValidationEvery");
+            dboValidationConfidenceProp = serializedObject.FindProperty("dboValidationConfidence");
+            dboValidationVisitedOnlyProp = serializedObject.FindProperty("dboValidationVisitedOnly");
+            dboStationaryBaselineProp = serializedObject.FindProperty("dboStationaryBaseline");
             contextualOptimizationProp = serializedObject.FindProperty("contextualOptimization");
             contextEmbeddingSourceProp = serializedObject.FindProperty("contextEmbeddingSource");
             currentContextKeyProp = serializedObject.FindProperty("currentContextKey");
@@ -247,12 +281,18 @@ namespace BOforUnity.Editor
                 optimizerBackendProp,
                 new GUIContent(
                     "Backend",
-                    "Choose BoTorch (bo.py/mobo.py) or CABOP (cost-aware backend)."
+                    "Choose BoTorch (bo.py/mobo.py), CABOP (cost-aware backend), MetaTAF " +
+                    "(multi-objective Meta-BO that transfers from population models of prior runs), " +
+                    "or DBO (dynamic BO for a single objective that drifts during the session)."
                 )
             );
 
             bool useCabop = (BoForUnityManager.OptimizerBackend)optimizerBackendProp.enumValueIndex ==
                             BoForUnityManager.OptimizerBackend.CABOP;
+            bool useMetaTaf = (BoForUnityManager.OptimizerBackend)optimizerBackendProp.enumValueIndex ==
+                              BoForUnityManager.OptimizerBackend.MetaTAF;
+            bool useDbo = (BoForUnityManager.OptimizerBackend)optimizerBackendProp.enumValueIndex ==
+                          BoForUnityManager.OptimizerBackend.DBO;
             if (useCabop)
             {
                 EditorGUILayout.PropertyField(
@@ -308,7 +348,186 @@ namespace BOforUnity.Editor
                 }
             }
 
-            DrawContextualOptimizationSettings(useCabop);
+            if (useMetaTaf)
+            {
+                EditorGUILayout.PropertyField(
+                    metaSourceDirProp,
+                    new GUIContent(
+                        "Meta Source Dir",
+                        "Folder with the population models (gp_states/ + trajectories/), relative to " +
+                        "StreamingAssets/BOData (or an absolute path). Generate it with meta_train.py."
+                    )
+                );
+                EditorGUILayout.PropertyField(
+                    metaRequireSourcesProp,
+                    new GUIContent(
+                        "Meta Require Sources",
+                        "Abort the run when no population model survives frame validation, " +
+                        "instead of silently continuing as plain qLogNEHVI (the no-transfer " +
+                        "control). Keep this ON for studies."
+                    )
+                );
+                EditorGUILayout.PropertyField(
+                    metaWeightModeProp,
+                    new GUIContent(
+                        "Meta Weight Mode",
+                        "TafR: weight sources by objective-wise pairwise ranking agreement with the " +
+                        "current user's data (recommended). TafM: weight by meta-feature similarity. " +
+                        "TafRPareto: the former Pareto-dominance TafR, kept only as an ablation."
+                    )
+                );
+                EditorGUILayout.PropertyField(
+                    metaRhoProp,
+                    new GUIContent("Meta Rho", "Epanechnikov kernel bandwidth for source weights.")
+                );
+                EditorGUILayout.PropertyField(
+                    metaTargetWeightProp,
+                    new GUIContent("Meta Target Weight", "Weight of the current user's own model in the blend.")
+                );
+                EditorGUILayout.PropertyField(
+                    metaWarmupItersProp,
+                    new GUIContent(
+                        "Meta Warmup Iters",
+                        "Number of initial optimization suggestions driven by the population models alone."
+                    )
+                );
+                EditorGUILayout.PropertyField(
+                    metaDecayStartIterProp,
+                    new GUIContent(
+                        "Meta Decay Start Iter",
+                        "Iteration after which population influence starts to decay (d1 in Liao et al., CHI '24)."
+                    )
+                );
+                EditorGUILayout.PropertyField(
+                    metaDecayRateProp,
+                    new GUIContent(
+                        "Meta Decay Rate",
+                        "Per-iteration decay of population influence (d2). 0 disables the decay — " +
+                        "ablation only: without decay, sources never hand control back and final " +
+                        "hypervolume drops below plain multi-objective BO."
+                    )
+                );
+
+                int metaObjectiveCount = objectiveList.count;
+                if (metaObjectiveCount < 2)
+                {
+                    EditorGUILayout.HelpBox(
+                        "MetaTAF is multi-objective: configure at least 2 objectives.",
+                        MessageType.Warning
+                    );
+                }
+                if (warmStartProp != null && warmStartProp.boolValue)
+                {
+                    EditorGUILayout.HelpBox(
+                        "MetaTAF does not support Warm Start (population models are its transfer " +
+                        "mechanism). Disable Warm Start or switch the backend.",
+                        MessageType.Error
+                    );
+                }
+                EditorGUILayout.HelpBox(
+                    "Sources whose parameter/objective definitions (names, bounds, minimize flags) do " +
+                    "not exactly match this study are skipped at runtime. Requires the openbo package; " +
+                    "see docs/meta-taf-student-guide.md.",
+                    MessageType.Info
+                );
+            }
+
+            if (useDbo)
+            {
+                EditorGUILayout.PropertyField(
+                    dboSpatialKernelProp,
+                    new GUIContent(
+                        "DBO Spatial Kernel",
+                        "Covariance over the design parameters. Rbf (squared exponential with ARD) " +
+                        "matches the reference DBO implementation."
+                    )
+                );
+                EditorGUILayout.PropertyField(
+                    dboAlphaParameterizationProp,
+                    new GUIContent(
+                        "DBO Alpha Parameterization",
+                        "How the temporal decay rate is fitted. Decay reproduces the reference " +
+                        "implementation; Direct behaves better when drift is fast."
+                    )
+                );
+                EditorGUILayout.PropertyField(
+                    dboInitialAlphaProp,
+                    new GUIContent(
+                        "DBO Initial Alpha",
+                        "Starting decay rate before fitting. 0.99 matches the reference; the fitted " +
+                        "value per iteration is logged to DboDiagnosticsPerEvaluation.csv."
+                    )
+                );
+                EditorGUILayout.PropertyField(
+                    dboExplorationRatioProp,
+                    new GUIContent(
+                        "DBO Exploration Ratio",
+                        "Re-search with inflated variance when the acquisition collapses onto a point " +
+                        "the model is already sure about. 0 disables (plain EI)."
+                    )
+                );
+                EditorGUILayout.PropertyField(
+                    dboAcquisitionTimeOffsetProp,
+                    new GUIContent(
+                        "DBO Acquisition Time Offset",
+                        "0 scores candidates at the current time (reference behaviour); 1 scores them " +
+                        "at the time they will actually be evaluated."
+                    )
+                );
+                EditorGUILayout.PropertyField(
+                    dboValidationEveryProp,
+                    new GUIContent(
+                        "DBO Validation Every",
+                        "Every N iterations apply the model's best estimate instead of an exploratory " +
+                        "point, making optimisers comparable. 0 disables."
+                    )
+                );
+                if (dboValidationEveryProp.intValue > 0)
+                {
+                    EditorGUILayout.PropertyField(
+                        dboValidationConfidenceProp,
+                        new GUIContent(
+                            "DBO Validation Confidence",
+                            "Tail probability of the validation upper confidence bound " +
+                            "(0.01 ≈ mean + 2.33 sd)."
+                        )
+                    );
+                    EditorGUILayout.PropertyField(
+                        dboValidationVisitedOnlyProp,
+                        new GUIContent(
+                            "DBO Validation Visited Only",
+                            "Restrict validation candidates to already-evaluated inputs (reference " +
+                            "behaviour). Off searches the continuous domain."
+                        )
+                    );
+                }
+                EditorGUILayout.PropertyField(
+                    dboStationaryBaselineProp,
+                    new GUIContent(
+                        "DBO Stationary Baseline",
+                        "Pin alpha = 1, reducing DBO to plain stationary BO — the ablation/baseline " +
+                        "condition for comparisons."
+                    )
+                );
+
+                int dboObjectiveCount = objectiveList.count;
+                if (dboObjectiveCount != 1)
+                {
+                    EditorGUILayout.HelpBox(
+                        "DBO is single-objective: configure exactly 1 objective.",
+                        MessageType.Warning
+                    );
+                }
+                EditorGUILayout.HelpBox(
+                    "DBO models a cost that drifts while you optimise it (adaptation, learning, " +
+                    "fatigue). Watch the fitted alpha in DboDiagnosticsPerEvaluation.csv: near 1.0 " +
+                    "for a whole run means the objective did not measurably drift. See " +
+                    "Kim & Sergi, IEEE RA-L 2026 (doi 10.1109/LRA.2026.3665072).",
+                    MessageType.Info
+                );
+            }
+
+            DrawContextualOptimizationSettings(useCabop || useMetaTaf || useDbo);
 
             // ── Optimization Budget (iterations & termination) ──────────────────────
             EditorGUILayout.Space();
@@ -501,7 +720,7 @@ namespace BOforUnity.Editor
             EditorGUILayout.PropertyField(optimizerStatePanelProp);
         }
 
-        private void DrawContextualOptimizationSettings(bool useCabop)
+        private void DrawContextualOptimizationSettings(bool nonBoTorchBackend)
         {
             EditorGUILayout.Space();
             GUILayout.Box(GUIContent.none, GUILayout.ExpandWidth(true), GUILayout.Height(3));
@@ -520,7 +739,7 @@ namespace BOforUnity.Editor
             if (!contextualOptimizationProp.boolValue)
                 return;
 
-            if (useCabop)
+            if (nonBoTorchBackend)
             {
                 EditorGUILayout.HelpBox(
                     "Contextual optimization is only supported with the BoTorch backend. " +

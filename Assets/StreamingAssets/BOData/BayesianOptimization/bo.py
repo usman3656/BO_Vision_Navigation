@@ -30,6 +30,7 @@ if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
 import context_support
+import bo_normalize
 
 # -------------------- defaults (overwritten by Unity init) --------------------
 N_INITIAL = 5
@@ -193,98 +194,27 @@ def write_data_to_csv(csv_file_path, fieldnames, rows):
         w = csv.DictWriter(f, fieldnames=fieldnames, delimiter=';')
         w.writerows(rows)
 
+# Frame transforms live in bo_normalize so that this backend, mobo.py and the offline
+# Meta-TAF source generators cannot drift apart. Thin wrappers keep the call sites
+# (and the test suite) unchanged.
 def denormalize_to_original_param(val01, lo, hi, decimals=3):
-    v = lo + val01 * (hi - lo)
-    if decimals is None:
-        return float(v)
-    return np.round(v, decimals)
+    return bo_normalize.denormalize_to_original_param(val01, lo, hi, decimals)
 
 def denormalize_to_original_obj(v_m1p1, lo, hi, smaller_is_better):
-    v = -v_m1p1 if int(smaller_is_better) == 1 else v_m1p1
-    return np.round(lo + (v + 1) * 0.5 * (hi - lo), 3)
+    return bo_normalize.denormalize_to_original_obj(v_m1p1, lo, hi, smaller_is_better)
 
 
 def normalize_param_column(col, lo, hi):
-    col = np.asarray(col, dtype=np.float64)
-    eps = 1e-8
-    in_raw_range = np.all((lo - eps <= col) & (col <= hi + eps))
-    in_norm_range = np.all((-eps <= col) & (col <= 1.0 + eps))
-
-    if hi == lo:
-        if np.allclose(col, lo, rtol=0.0, atol=1e-8):
-            return np.zeros_like(col)
-        if in_norm_range and np.allclose(col, 0.0, rtol=0.0, atol=1e-8):
-            return np.zeros_like(col)
-        raise ValueError(
-            f"Warm-start parameter values out of bounds for degenerate interval [{lo}, {hi}]"
-        )
-
-    if in_raw_range:
-        return np.clip((col - lo) / (hi - lo), 0.0, 1.0)
-    if in_norm_range:
-        # Fallback for previously normalized warm-start files.
-        return np.clip(col, 0.0, 1.0)
-    raise ValueError(
-        f"Warm-start parameter values must be within raw bounds [{lo}, {hi}] or normalized [0,1], "
-        f"got range [{np.min(col)}, {np.max(col)}]"
-    )
+    return bo_normalize.normalize_param_column(col, lo, hi)
 
 
 def normalize_obj_column(col, lo, hi, minflag):
-    col = np.asarray(col, dtype=np.float64)
-    raw_range_detected = np.all((lo - 1e-8 <= col) & (col <= hi + 1e-8))
-    norm_range_detected = np.all((-1.0 - 1e-8 <= col) & (col <= 1.0 + 1e-8))
-    in_raw_range = raw_range_detected
-    in_norm_range = norm_range_detected
-
-    if WARM_START_OBJECTIVE_FORMAT == "raw":
-        if not raw_range_detected:
-            raise ValueError(
-                f"warmStartObjectiveFormat=raw requires values in [{lo},{hi}], "
-                f"but received range [{np.min(col)}, {np.max(col)}]"
-            )
-        in_raw_range = True
-        in_norm_range = False
-    elif WARM_START_OBJECTIVE_FORMAT == "normalized_max":
-        if not norm_range_detected:
-            raise ValueError(
-                f"warmStartObjectiveFormat=normalized_max requires values in [-1,1], "
-                f"but received range [{np.min(col)}, {np.max(col)}]"
-            )
-        in_raw_range = False
-        in_norm_range = True
-    elif WARM_START_OBJECTIVE_FORMAT == "normalized_native":
-        if not norm_range_detected:
-            raise ValueError(
-                f"warmStartObjectiveFormat=normalized_native requires values in [-1,1], "
-                f"but received range [{np.min(col)}, {np.max(col)}]"
-            )
-        in_raw_range = False
-        in_norm_range = True
-
-    if in_raw_range:
-        if WARM_START_OBJECTIVE_FORMAT == "auto" and in_norm_range:
-            print(
-                "Warning: warm-start objective values are ambiguous (fit both raw bounds and [-1,1]); assuming raw scale.",
-                flush=True,
-            )
-        if hi == lo:
-            y = np.zeros_like(col)
-        else:
-            y = (col - lo) / (hi - lo) * 2.0 - 1.0
-            if int(minflag) == 1:
-                y = -y
-    elif in_norm_range:
-        # already normalized
-        y = np.clip(col, -1.0, 1.0)
-        if WARM_START_OBJECTIVE_FORMAT == "normalized_native" and int(minflag) == 1:
-            y = -y
-    else:
-        raise ValueError(
-            f"Warm-start objective values must be within raw bounds [{lo}, {hi}] or normalized [-1,1], "
-            f"got range [{np.min(col)}, {np.max(col)}]"
-        )
-    return np.clip(y, -1.0, 1.0)
+    # The warm-start format stays a module global here (it is set once from the Unity
+    # init message); bo_normalize takes it explicitly so offline generators can request
+    # "raw" without mutating shared state.
+    return bo_normalize.normalize_obj_column(
+        col, lo, hi, minflag, fmt=WARM_START_OBJECTIVE_FORMAT
+    )
 
 
 def expected_observation_columns():
@@ -403,7 +333,7 @@ def objective_function(conn, x_tensor):
     return torch.tensor([f], dtype=torch.double)
 
 # -------------------- data IO --------------------
-def generate_initial_data(conn, n_samples):
+def generate_initial_data(conn, n_samples, metric_values=None):
     global PROJECT_PATH
     if n_samples < 1:
         raise ValueError("n_samples must be >= 1 for non-warm-start runs.")
@@ -442,6 +372,10 @@ def generate_initial_data(conn, n_samples):
                'TRUE' if is_best else 'FALSE', y_den, *x_den]
         with open(obs_csv, 'a', newline='') as f:
             csv.writer(f, delimiter=';').writerow(row)
+
+        if metric_values is not None:
+            metric_values.append(best_so_far)
+            save_metric_to_file(metric_values, i + 1)
 
         send_json_line(conn, {"type": "tempCoverage", "value": float(i+1)/float(max(1,n_samples))})
 
@@ -647,7 +581,7 @@ def save_metric_to_file(metric_values, iteration):
     with open(best_csv, 'a', newline='') as f:
         w = csv.writer(f, delimiter=';')
         if write_best_header:
-            w.writerow(["BestObjective", "Run"])
+            w.writerow(["BestObjective", "Iteration"])
         w.writerow([metric_values[-1], iteration])
 
     # Legacy mirror for older analysis scripts that still read this file.
@@ -655,7 +589,7 @@ def save_metric_to_file(metric_values, iteration):
     with open(legacy_csv, 'a', newline='') as f:
         w = csv.writer(f, delimiter=';')
         if write_legacy_header:
-            w.writerow(["Hypervolume", "Run"])
+            w.writerow(["Hypervolume", "Iteration"])
         w.writerow([metric_values[-1], iteration])
 
 # -------------------- main loop --------------------
@@ -678,13 +612,13 @@ def bo_execute(conn, seed, iterations, initial_samples):
     if WARM_START:
         train_x, train_y = load_data()
     else:
-        train_x, train_y = generate_initial_data(conn, n_samples=initial_samples)
+        train_x, train_y = generate_initial_data(
+            conn, n_samples=initial_samples, metric_values=metric_values
+        )
 
     mll, model = initialize_model(train_x, train_y)
 
     best = best_current_context_objective(train_x, train_y)
-    metric_values.append(best)
-    save_metric_to_file(metric_values, 0)
     send_json_line(conn, {"type": "coverage", "value": float(best)})
 
     for it in range(1, iterations + 1):
@@ -704,7 +638,9 @@ def bo_execute(conn, seed, iterations, initial_samples):
         best = best_current_context_objective(train_x, train_y)
         metric_values.append(best)
         save_xy(train_x, train_y, it)
-        save_metric_to_file(metric_values, it)
+        save_metric_to_file(
+            metric_values, it if WARM_START else initial_samples + it
+        )
         send_json_line(conn, {"type": "coverage", "value": float(best)})
 
         mll, model = initialize_model(train_x, train_y)

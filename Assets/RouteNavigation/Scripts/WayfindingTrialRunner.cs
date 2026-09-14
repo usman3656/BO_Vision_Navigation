@@ -62,6 +62,9 @@ namespace RouteNavigation
                 yield break;
             }
 
+            // Hide the optimizer's status panels so they don't cover the game during the walk + rating.
+            HideManagerPanels();
+
             // (1) Read the 6 chosen parameters (already 0..1 because their bounds are 0..1).
             TryGetParam(0, out float r);
             TryGetParam(1, out float g);
@@ -97,6 +100,15 @@ namespace RouteNavigation
             _bo.OptimizationStart();
             if (_bo.iterationAdvanceMode == BoForUnityManager.IterationAdvanceMode.ExternalSignal && _bo.optimizationRunning)
                 _bo.RequestNextIteration();
+        }
+
+        /// <summary>Hides the BO manager's welcome/optimizer/loading UI so the game is visible during the walk.</summary>
+        private void HideManagerPanels()
+        {
+            if (_bo == null) return;
+            if (_bo.welcomePanel != null) _bo.welcomePanel.SetActive(false);
+            if (_bo.optimizerStatePanel != null) _bo.optimizerStatePanel.SetActive(false);
+            if (_bo.loadingObj != null) _bo.loadingObj.SetActive(false);
         }
 
         /// <summary>Reads the index-th valid BO parameter, clamped to 0..1. Mirrors ColorGuesser.</summary>

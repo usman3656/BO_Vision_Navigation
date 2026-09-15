@@ -118,6 +118,7 @@ namespace RouteNavigation
                 {
                     TeleportPlayer(startPoint.position);
                     if (playerController != null) playerController.enabled = true;
+                    EnsurePlayerCamera(); // make sure we're looking through the player's own camera
                     yield return WalkFps();
                     walkSeconds = _lastWalkSeconds;
                 }
@@ -205,15 +206,14 @@ namespace RouteNavigation
         {
             if (playerRoot == null) return;
             Camera mine = playerRoot.GetComponentInChildren<Camera>(true);
-            if (mine == null) return; // can't identify the player's camera; leave cameras alone
+            if (mine == null) { Debug.LogWarning("[Trial] Could not find the player's own camera to render through."); return; }
             mine.gameObject.SetActive(true);
             mine.enabled = true;
-            // Only turn off a leftover rival WalkCamera (from an old build); never touch the scene's cameras.
-            foreach (var walkCam in FindObjectsByType<DesktopWalkController>(FindObjectsInactive.Include, FindObjectsSortMode.None))
-            {
-                var rival = walkCam.GetComponentInChildren<Camera>(true);
-                if (rival != null && rival != mine) rival.enabled = false;
-            }
+            mine.depth = 100f; // win over anything else that is still enabled
+            // Make the player's camera the ONLY one rendering, so the view follows the player,
+            // not a static leftover/scene camera.
+            foreach (var cam in FindObjectsByType<Camera>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                if (cam != mine) cam.enabled = false;
         }
 
         private void HideManagerPanels()

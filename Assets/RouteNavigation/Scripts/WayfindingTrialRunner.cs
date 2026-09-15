@@ -45,6 +45,8 @@ namespace RouteNavigation
         public string aestheticsKey = "Aesthetics";
 
         private BoForUnityManager _bo;
+        private bool _awaitingStart;
+        private bool _startPressed;
         private bool _awaitingRating;
         private bool _ratingConfirmed;
         private int _rating = 5;
@@ -108,6 +110,17 @@ namespace RouteNavigation
 
             HideManagerPanels();
             if (useFps) TeleportPlayer(startPoint.position);
+
+            // Wait for the participant to press START before the first trial begins.
+            if (useFps && playerController != null) playerController.enabled = false;
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            _startPressed = false;
+            _awaitingStart = true;
+            _status = "Ready. Press START to begin.";
+            while (!_startPressed && !_bo.optimizationFinished) yield return null;
+            _awaitingStart = false;
+            if (useFps && playerController != null) playerController.enabled = true;
 
             while (!_bo.optimizationFinished)
             {
@@ -303,6 +316,17 @@ namespace RouteNavigation
                 GUI.Label(new Rect(16f, 38f, 900f, 28f), $"[debug] distance to goal: {d:F1} m   |   player control: {ctl}");
             }
             GUI.Label(new Rect(16f, 64f, 900f, 24f), $"Participant: {participantId}    |    Condition: {conditionId}");
+
+            if (_awaitingStart)
+            {
+                float bw = 440f, bh = 170f;
+                var b = new Rect((Screen.width - bw) / 2f, (Screen.height - bh) / 2f, bw, bh);
+                GUI.Box(b, GUIContent.none);
+                var startStyle = new GUIStyle(GUI.skin.button) { fontSize = 42, fontStyle = FontStyle.Bold };
+                if (GUI.Button(new Rect(b.x + 30f, b.y + 34f, bw - 60f, bh - 68f), "▶  START", startStyle))
+                    _startPressed = true;
+                return;
+            }
 
             if (_awaitingRating)
             {

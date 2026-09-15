@@ -5,27 +5,35 @@ using UnityEngine;
 namespace RouteNavigation
 {
     /// <summary>
-    /// Runs ONE Bayesian Optimization trial of the wayfinding-path study, then advances the loop.
-    /// The framework reloads the scene each trial, so this component's Awake is the per-trial entry.
+    /// Drives the whole wayfinding-path study in ONE continuous scene (no per-trial scene reload).
+    /// It uses the scene's OWN first-person player (e.g. Vol.7's FirstPersonAIO) so we don't fight its
+    /// camera or controller. Each trial it:
+    ///   1. reads the 6 chosen parameters (R,G,B,Opacity,Size,Height, 0..1) and paints the path,
+    ///   2. teleports the player to Start and lets them walk to Goal (timed),
+    ///   3. pauses the player and asks for a 1..20 look rating (on-screen),
+    ///   4. submits both objectives (WalkTime, Aesthetics) and waits for the optimizer's next parameters.
     ///
-    /// Per trial it:
-    ///   1. waits until the optimizer has real parameters ready,
-    ///   2. reads the 6 chosen parameters (R,G,B,Opacity,Size,Height, all 0..1) and paints the path,
-    ///   3. lets the user walk Start->Goal (DesktopWalkController times it),
-    ///   4. asks for a 1..20 look rating (on-screen, no extra UI setup),
-    ///   5. submits both objectives (WalkTime, Aesthetics) and requests the next iteration.
-    ///
-    /// Configure the BO manager once with: Tools > BO Route > Configure BO Manager (Wayfinding).
+    /// The player is auto-found (any component whose type is named "FirstPersonAIO"). For scenes without
+    /// one (e.g. FCG) assign a DesktopWalkController in the Walker slot instead.
     /// </summary>
     public class WayfindingTrialRunner : MonoBehaviour
     {
         [Header("Scene references")]
         public WayfindingPathController path;
-        public DesktopWalkController walker;
         public Transform startPoint;
         public Transform goalPoint;
 
-        [Header("Objective keys (must match the BO manager objectives)")]
+        [Header("Player (auto-found if left empty)")]
+        [Tooltip("The scene's first-person player object to teleport and track. Auto-found (FirstPersonAIO) if empty.")]
+        public Transform playerRoot;
+        [Tooltip("The player's controller script; it is paused during the rating so the cursor is free. Auto-found.")]
+        public Behaviour playerController;
+        [Tooltip("Fallback walker for scenes with no first-person controller (e.g. FCG).")]
+        public DesktopWalkController walker;
+
+        [Header("Tuning")]
+        [Tooltip("XZ distance to the goal (metres) that counts as arrived.")]
+        public float arriveRadius = 2f;
         public string walkTimeKey = "WalkTime";
         public string aestheticsKey = "Aesthetics";
 
@@ -33,76 +41,150 @@ namespace RouteNavigation
         private bool _awaitingRating;
         private bool _ratingConfirmed;
         private int _rating = 10;
-        private string _status = "";
+        private string _status = "Starting up...";
+        private int _trial;
 
         private void Awake()
         {
             _bo = FindAnyObjectByType<BoForUnityManager>();
-            StartCoroutine(RunTrial());
+            if (_bo != null) _bo.reloadSceneOnIterationAdvance = false; // one persistent scene; we loop here
+
+            if (playerRoot == null) AutoFindFirstPersonPlayer();
+            StartCoroutine(RunLoop());
         }
 
-        private IEnumerator RunTrial()
+        /// <summary>Finds the scene's first-person controller by type name, so we don't hard-depend on the asset.</summary>
+        private void AutoFindFirstPersonPlayer()
+        {
+            foreach (var mb in FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                if (mb != null && mb.GetType().Name == "FirstPersonAIO")
+                {
+                    playerRoot = mb.transform;
+                    playerController = mb;
+                    return;
+                }
+            }
+        }
+
+        private IEnumerator RunLoop()
         {
             if (_bo == null) { Debug.LogError("[Trial] No BoForUnityManager in the scene."); yield break; }
-
-            // Wait until the optimizer has initialised. On first play the manager initialises then
-            // auto-advances (reloading the scene), so the real trial runs on the reloaded scene where
-            // this trial's parameter Values are already applied. We gate only on `initialized` (like the
-            // shipped ColorGuesser/TargetClicker tasks) because the manager clears
-            // hasNewDesignParameterValues before each reload, and we stop once the study is finished.
-            while (!_bo.optimizationFinished && !_bo.initialized)
-                yield return null;
-
-            if (_bo.optimizationFinished) { _status = "Study complete. Thank you."; yield break; }
-            yield return null; // one more frame so the scene + navmesh are fully settled
-
-            if (path == null || walker == null || startPoint == null || goalPoint == null)
+            if (path == null || startPoint == null || goalPoint == null)
             {
-                Debug.LogError("[Trial] Assign path, walker, startPoint and goalPoint on WayfindingTrialRunner.");
+                Debug.LogError("[Trial] Assign path, startPoint and goalPoint on WayfindingTrialRunner.");
+                yield break;
+            }
+            bool useFps = playerRoot != null;
+            if (!useFps && walker == null)
+            {
+                Debug.LogError("[Trial] No player found. Assign a Walker, or add a FirstPersonAIO player to the scene.");
                 yield break;
             }
 
-            // Hide the optimizer's status panels so they don't cover the game during the walk + rating.
+            _status = "Starting optimizer (Python), please wait...";
+            while (!_bo.initialized && !_bo.optimizationFinished) yield return null;
+
             HideManagerPanels();
+            if (useFps) TeleportPlayer(startPoint.position);
 
-            // (1) Read the 6 chosen parameters (already 0..1 because their bounds are 0..1).
-            TryGetParam(0, out float r);
-            TryGetParam(1, out float g);
-            TryGetParam(2, out float b);
-            TryGetParam(3, out float opacity);
-            TryGetParam(4, out float size);
-            TryGetParam(5, out float height);
+            while (!_bo.optimizationFinished)
+            {
+                HideManagerPanels();
+                _trial++;
 
-            // (2) Build the route (subset NavMesh) and paint it with this trial's appearance.
-            path.RebuildRoute();
-            path.ApplyParameters(r, g, b, opacity, size, height);
+                // (1) Read the 6 chosen parameters and paint the path.
+                TryGetParam(0, out float r);
+                TryGetParam(1, out float g);
+                TryGetParam(2, out float b);
+                TryGetParam(3, out float opacity);
+                TryGetParam(4, out float size);
+                TryGetParam(5, out float height);
+                path.RebuildRoute();
+                path.ApplyParameters(r, g, b, opacity, size, height);
+                ClearObjectiveValues();
 
-            // (3) Walk Start -> Goal, timed.
-            walker.ResetTo(startPoint);
-            _status = "Walk to the goal.";
-            walker.Begin(goalPoint);
-            while (!walker.Finished) yield return null;
-            float walkSeconds = walker.ElapsedSeconds;
+                // (2) Walk Start -> Goal, timed.
+                float walkSeconds;
+                _status = $"Trial {_trial}: walk to the RED goal (WASD + mouse).";
+                if (useFps)
+                {
+                    TeleportPlayer(startPoint.position);
+                    if (playerController != null) playerController.enabled = true;
+                    yield return WalkFps();
+                    walkSeconds = _lastWalkSeconds;
+                }
+                else
+                {
+                    walker.ResetTo(startPoint);
+                    walker.Begin(goalPoint);
+                    while (!walker.Finished) yield return null;
+                    walkSeconds = walker.ElapsedSeconds;
+                }
 
-            // (4) Rate the look, 1..20 (on-screen panel below).
-            _rating = 10;
-            _ratingConfirmed = false;
-            _awaitingRating = true;
-            while (!_ratingConfirmed) yield return null;
-            _awaitingRating = false;
-            int aesthetics = _rating;
+                // (3) Pause the player and rate the look, 1..20.
+                if (useFps && playerController != null) playerController.enabled = false;
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                _rating = 10;
+                _ratingConfirmed = false;
+                _awaitingRating = true;
+                while (!_ratingConfirmed) yield return null;
+                _awaitingRating = false;
+                int aesthetics = _rating;
+                if (useFps && playerController != null) playerController.enabled = true;
 
-            // (5) Submit both objectives and advance.
-            AddObjectiveByKey(walkTimeKey, walkSeconds);
-            AddObjectiveByKey(aestheticsKey, aesthetics);
-            _status = "Submitted. Loading the next path...";
+                // (4) Submit both objectives and wait for the optimizer's next parameters.
+                AddObjectiveByKey(walkTimeKey, walkSeconds);
+                AddObjectiveByKey(aestheticsKey, aesthetics);
+                _status = "Submitted. The optimizer is thinking...";
+                int iterationBefore = _bo.currentIteration;
+                _bo.OptimizationStart();
+                while (!_bo.optimizationFinished && _bo.currentIteration == iterationBefore)
+                {
+                    HideManagerPanels();
+                    yield return null;
+                }
+            }
 
-            _bo.OptimizationStart();
-            if (_bo.iterationAdvanceMode == BoForUnityManager.IterationAdvanceMode.ExternalSignal && _bo.optimizationRunning)
-                _bo.RequestNextIteration();
+            _status = "Study complete. Thank you!";
         }
 
-        /// <summary>Hides the BO manager's welcome/optimizer/loading UI so the game is visible during the walk.</summary>
+        private float _lastWalkSeconds;
+
+        /// <summary>Times the first-person walk from first movement to arrival at the goal (XZ).</summary>
+        private IEnumerator WalkFps()
+        {
+            Vector3 startXz = Flat(playerRoot.position);
+            bool moving = false;
+            float elapsed = 0f;
+            while (true)
+            {
+                Vector3 hereXz = Flat(playerRoot.position);
+                if (!moving && Vector3.Distance(hereXz, startXz) > 0.3f) moving = true;
+                if (moving) elapsed += Time.deltaTime;
+                if (Vector3.Distance(hereXz, Flat(goalPoint.position)) <= arriveRadius) break;
+                yield return null;
+            }
+            _lastWalkSeconds = elapsed;
+        }
+
+        private static Vector3 Flat(Vector3 v) { v.y = 0f; return v; }
+
+        /// <summary>Teleports the Rigidbody/collider player to a spot just above the floor point.</summary>
+        private void TeleportPlayer(Vector3 floorPos)
+        {
+            Vector3 pos = floorPos + Vector3.up * 1.0f; // lift so the capsule doesn't spawn inside the floor
+            var rb = playerRoot.GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+                rb.position = pos;
+            }
+            playerRoot.position = pos;
+        }
+
         private void HideManagerPanels()
         {
             if (_bo == null) return;
@@ -111,7 +193,6 @@ namespace RouteNavigation
             if (_bo.loadingObj != null) _bo.loadingObj.SetActive(false);
         }
 
-        /// <summary>Reads the index-th valid BO parameter, clamped to 0..1. Mirrors ColorGuesser.</summary>
         private bool TryGetParam(int index, out float value)
         {
             value = 0.5f;
@@ -127,7 +208,13 @@ namespace RouteNavigation
             return false;
         }
 
-        /// <summary>Appends a value to the objective with the given key (case/space-insensitive).</summary>
+        private void ClearObjectiveValues()
+        {
+            if (_bo?.objectives == null) return;
+            foreach (var o in _bo.objectives)
+                if (o?.value?.values != null) o.value.values.Clear();
+        }
+
         private bool AddObjectiveByKey(string key, float value)
         {
             if (_bo?.objectives == null) return false;
@@ -146,25 +233,23 @@ namespace RouteNavigation
 
         private void OnGUI()
         {
+            GUI.Label(new Rect(16f, 12f, 900f, 28f), _status);
+
+            if (!_awaitingRating && walker != null && walker.Walking)
+                GUI.Label(new Rect(16f, 38f, 500f, 28f), $"Time: {walker.ElapsedSeconds:F1}s");
+
             if (_awaitingRating)
             {
-                const float w = 540f, h = 150f;
+                const float w = 560f, h = 160f;
                 var box = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
                 GUI.Box(box, "Rate the PATH APPEARANCE");
-                GUILayout.BeginArea(new Rect(box.x + 20f, box.y + 34f, w - 40f, h - 44f));
+                GUILayout.BeginArea(new Rect(box.x + 20f, box.y + 36f, w - 40f, h - 46f));
                 GUILayout.Label($"1 = ugly,  20 = beautiful.     Your rating: {_rating}");
                 _rating = Mathf.RoundToInt(GUILayout.HorizontalSlider(_rating, 1f, 20f));
                 GUILayout.Space(12f);
                 if (GUILayout.Button("Confirm rating")) _ratingConfirmed = true;
                 GUILayout.EndArea();
-                return;
             }
-
-            if (walker != null && walker.Walking)
-                GUI.Label(new Rect(20f, 20f, 500f, 30f), $"Walk to the goal.   Time: {walker.ElapsedSeconds:F1}s");
-
-            if (!string.IsNullOrEmpty(_status))
-                GUI.Label(new Rect(20f, 46f, 600f, 30f), _status);
         }
     }
 }

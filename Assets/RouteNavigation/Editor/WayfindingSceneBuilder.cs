@@ -6,17 +6,15 @@ using UnityEngine;
 namespace RouteNavigation.EditorTools
 {
     /// <summary>
-    /// Beginner-friendly setup for the wayfinding test: pick a fixed Start and Goal by framing them
-    /// in the Scene view, then build and wire every object with one click.
+    /// Beginner-friendly setup for the wayfinding test.
     ///
     /// Menus (Tools > BO Route > ...):
-    ///   Set Path Start Here (Scene view)  - drops/moves a green PathStart at the Scene view focus point.
-    ///   Set Path Goal Here (Scene view)   - drops/moves a red PathGoal at the Scene view focus point.
-    ///   Build Wayfinding Test Objects      - creates GuidancePath (path + NavMesh subset baker + Dijkstra),
-    ///                                        Player (walker), TrialRunner, all wired, and disables other cameras.
-    ///
-    /// Both routing modes are wired: switch GuidancePath > Wayfinding Path Controller > Routing between
-    /// NavMesh and Dijkstra to compare them on the same fixed Start/Goal.
+    ///   Set Path Start Here (Scene view)  - drops a bright GREEN glowing beacon at the Scene view focus.
+    ///   Set Path Goal Here (Scene view)   - drops a bright RED glowing beacon at the Scene view focus.
+    ///   Snap PathStart/PathGoal to Ground - drops the marker onto the floor beneath it.
+    ///   Build Wayfinding Test Objects      - wires GuidancePath (path + NavMesh subset baker + Dijkstra) and
+    ///                                        TrialRunner, uses the scene's own first-person player, and makes
+    ///                                        sure the scene camera is enabled.
     /// </summary>
     public static class WayfindingSceneBuilder
     {
@@ -35,20 +33,13 @@ namespace RouteNavigation.EditorTools
                 return;
             }
 
-            Vector3 pos = sv.pivot; // the point the Scene view is centred on
+            Vector3 pos = sv.pivot;
             var go = GameObject.Find(markerName);
             if (go == null)
             {
-                go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-                go.name = markerName;
-                var col = go.GetComponent<Collider>();
-                if (col != null) Object.DestroyImmediate(col);
-                go.transform.localScale = Vector3.one * 0.4f;
-                var mr = go.GetComponent<MeshRenderer>();
-                Shader sh = Shader.Find("Universal Render Pipeline/Lit");
-                if (sh == null) sh = Shader.Find("Standard");
-                if (sh != null && mr != null) mr.sharedMaterial = new Material(sh) { color = color };
+                go = new GameObject(markerName);
                 Undo.RegisterCreatedObjectUndo(go, "Create " + markerName);
+                BuildBeacon(go, color);
             }
 
             Undo.RecordObject(go.transform, "Move " + markerName);
@@ -56,8 +47,52 @@ namespace RouteNavigation.EditorTools
             SnapToGround(go.transform);
             Selection.activeGameObject = go;
             EditorSceneManager.MarkAllScenesDirty();
-            Debug.Log($"[Build] {markerName} placed near the Scene view focus and snapped to the ground. " +
-                      "To fine-tune: move it in X/Z with the Move tool (W), then run 'Snap " + markerName + " to Ground' again.");
+            Debug.Log($"[Build] {markerName} placed at {go.transform.position} as a glowing beacon. " +
+                      "Fine-tune with the Move tool (W), then 'Snap " + markerName + " to Ground' again.");
+        }
+
+        /// <summary>Builds a bright, unlit sphere + tall thin pillar so the marker is visible from anywhere.</summary>
+        private static void BuildBeacon(GameObject root, Color color)
+        {
+            Material mat = MakeUnlit(color);
+
+            var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            sphere.name = "Marker";
+            sphere.transform.SetParent(root.transform, false);
+            sphere.transform.localPosition = Vector3.up * 0.3f;
+            sphere.transform.localScale = Vector3.one * 0.6f;
+            StripCollider(sphere);
+            SetMaterial(sphere, mat);
+
+            var beam = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            beam.name = "Beacon";
+            beam.transform.SetParent(root.transform, false);
+            beam.transform.localPosition = Vector3.up * 2f;          // base near the floor, rising up
+            beam.transform.localScale = new Vector3(0.12f, 2f, 0.12f); // ~4 m tall, thin
+            StripCollider(beam);
+            SetMaterial(beam, mat);
+        }
+
+        private static Material MakeUnlit(Color color)
+        {
+            Shader sh = Shader.Find("Universal Render Pipeline/Unlit");
+            if (sh == null) sh = Shader.Find("Unlit/Color");
+            if (sh == null) sh = Shader.Find("Sprites/Default");
+            var m = new Material(sh) { color = color };
+            if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", color);
+            return m;
+        }
+
+        private static void StripCollider(GameObject go)
+        {
+            var col = go.GetComponent<Collider>();
+            if (col != null) Object.DestroyImmediate(col);
+        }
+
+        private static void SetMaterial(GameObject go, Material mat)
+        {
+            var mr = go.GetComponent<MeshRenderer>();
+            if (mr != null) mr.sharedMaterial = mat;
         }
 
         [MenuItem("Tools/BO Route/Snap PathStart to Ground")]
@@ -76,13 +111,11 @@ namespace RouteNavigation.EditorTools
             EditorSceneManager.MarkAllScenesDirty();
         }
 
-        /// <summary>Drops the marker straight down onto the floor. Uses a physics raycast if the floor has a
-        /// collider, otherwise falls back to the highest mesh surface directly beneath it (no collider needed).</summary>
+        /// <summary>Drops the marker onto the floor. Physics raycast first, then a collider-free mesh-bounds fallback.</summary>
         private static void SnapToGround(Transform t)
         {
             Vector3 p = t.position;
 
-            // 1) Physics raycast down (works when the floor has a collider).
             if (Physics.Raycast(p + Vector3.up * 100f, Vector3.down, out RaycastHit hit, 1000f))
             {
                 p.y = hit.point.y;
@@ -91,13 +124,12 @@ namespace RouteNavigation.EditorTools
                 return;
             }
 
-            // 2) No collider: pick the highest mesh whose footprint is under this X/Z and whose top is at or below us.
             float bestTop = float.NegativeInfinity;
             foreach (var mr in Object.FindObjectsByType<MeshRenderer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
             {
                 Bounds b = mr.bounds;
-                if (p.x < b.min.x || p.x > b.max.x || p.z < b.min.z || p.z > b.max.z) continue; // must be over it
-                if (b.max.y > p.y + 0.5f) continue;                                              // ignore things above us
+                if (p.x < b.min.x || p.x > b.max.x || p.z < b.min.z || p.z > b.max.z) continue;
+                if (b.max.y > p.y + 0.5f) continue;
                 if (b.max.y > bestTop) bestTop = b.max.y;
             }
 
@@ -125,10 +157,26 @@ namespace RouteNavigation.EditorTools
                 return;
             }
 
+            // Remove any rival player from an earlier build and re-enable cameras it may have disabled.
+            var oldPlayer = GameObject.Find("Player");
+            if (oldPlayer != null && oldPlayer.GetComponent<DesktopWalkController>() != null)
+                Undo.DestroyObjectImmediate(oldPlayer);
+
+            int reEnabled = 0;
+            foreach (var cam in Object.FindObjectsByType<Camera>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (!cam.gameObject.activeSelf)
+                {
+                    Undo.RecordObject(cam.gameObject, "Enable camera");
+                    cam.gameObject.SetActive(true);
+                    reEnabled++;
+                }
+            }
+
             // GuidancePath: draws the route; carries both routing backends.
             var pathGo = FindOrCreate("GuidancePath");
             var ctrl = GetOrAdd<WayfindingPathController>(pathGo);
-            var baker = GetOrAdd<NavMeshSubsetBaker>(pathGo);       // also adds NavMeshSurface (RequireComponent)
+            var baker = GetOrAdd<NavMeshSubsetBaker>(pathGo);
             var dijkstra = GetOrAdd<DijkstraGridPathfinder>(pathGo);
             Undo.RecordObject(ctrl, "Wire path");
             ctrl.waypoints = new Transform[] { start.transform, goal.transform };
@@ -139,33 +187,29 @@ namespace RouteNavigation.EditorTools
             baker.startPoint = start.transform;
             baker.goalPoint = goal.transform;
 
-            // Player: desktop walker (builds its own camera at play time).
-            var playerGo = FindOrCreate("Player");
-            var walker = GetOrAdd<DesktopWalkController>(playerGo);
-
-            // TrialRunner: the BO bridge.
+            // TrialRunner: the BO bridge. It auto-finds the scene's first-person player.
             var runnerGo = FindOrCreate("TrialRunner");
             var runner = GetOrAdd<WayfindingTrialRunner>(runnerGo);
             Undo.RecordObject(runner, "Wire runner");
             runner.path = ctrl;
-            runner.walker = walker;
             runner.startPoint = start.transform;
             runner.goalPoint = goal.transform;
 
-            // Disable other cameras so the player's runtime camera is the one that renders.
-            int disabled = 0;
-            foreach (var cam in Object.FindObjectsByType<Camera>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            string playerNote = "no FirstPersonAIO found - runner will look again at play time";
+            foreach (var mb in Object.FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
             {
-                if (cam.transform.IsChildOf(playerGo.transform)) continue;
-                Undo.RecordObject(cam.gameObject, "Disable camera");
-                cam.gameObject.SetActive(false);
-                disabled++;
+                if (mb.GetType().Name == "FirstPersonAIO")
+                {
+                    runner.playerRoot = mb.transform;
+                    runner.playerController = mb;
+                    playerNote = "using the scene's FirstPersonAIO player: " + mb.name;
+                    break;
+                }
             }
 
             EditorSceneManager.MarkAllScenesDirty();
-            Debug.Log($"[Build] Done. Wired GuidancePath (+NavMesh subset baker +Dijkstra), Player, TrialRunner. " +
-                      $"Disabled {disabled} other camera(s). Routing = NavMesh. " +
-                      "To compare, set GuidancePath > Wayfinding Path Controller > Routing = Dijkstra. Press Play.");
+            Debug.Log($"[Build] Done. Wired GuidancePath (+NavMesh subset baker +Dijkstra) and TrialRunner. " +
+                      $"Re-enabled {reEnabled} camera(s). {playerNote}. Routing = NavMesh. Press Play.");
         }
 
         private static GameObject FindOrCreate(string goName)

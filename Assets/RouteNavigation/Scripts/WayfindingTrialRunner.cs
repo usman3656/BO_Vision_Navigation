@@ -1,6 +1,7 @@
 using System.Collections;
 using BOforUnity;
 using UnityEngine;
+using UnityEngine.AI;
 
 namespace RouteNavigation
 {
@@ -167,9 +168,11 @@ namespace RouteNavigation
             while (true)
             {
                 Vector3 hereXz = Flat(playerRoot.position);
-                if (!moving && Vector3.Distance(hereXz, startXz) > 0.3f) moving = true;
+                if (!moving && Vector3.Distance(hereXz, startXz) > 0.5f) moving = true;
                 if (moving) elapsed += Time.deltaTime;
-                if (Vector3.Distance(hereXz, Flat(goalPoint.position)) <= arriveRadius) break;
+                // Only count arrival once the player has actually started walking, so a start
+                // placed near the goal can't instantly "complete" the trial and lock the controller.
+                if (moving && Vector3.Distance(hereXz, Flat(goalPoint.position)) <= arriveRadius) break;
                 yield return null;
             }
             _lastWalkSeconds = elapsed;
@@ -180,15 +183,20 @@ namespace RouteNavigation
         /// <summary>Teleports the Rigidbody/collider player to a spot just above the floor point.</summary>
         private void TeleportPlayer(Vector3 floorPos)
         {
-            Vector3 pos = floorPos + Vector3.up * 1.0f; // lift so the capsule doesn't spawn inside the floor
+            // Snap to a genuinely walkable navmesh point so the capsule never spawns wedged in geometry.
+            Vector3 target = floorPos;
+            if (NavMesh.SamplePosition(floorPos, out NavMeshHit hit, 6f, NavMesh.AllAreas))
+                target = hit.position;
+            target += Vector3.up * 1.1f; // lift so the capsule bottom clears the floor
+
             var rb = playerRoot.GetComponent<Rigidbody>();
             if (rb != null)
             {
                 rb.linearVelocity = Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
-                rb.position = pos;
+                rb.position = target;
             }
-            playerRoot.position = pos;
+            playerRoot.position = target;
         }
 
         /// <summary>Makes the player's own camera the one that renders: enables it, disables every other camera
@@ -200,8 +208,12 @@ namespace RouteNavigation
             if (mine == null) return; // can't identify the player's camera; leave cameras alone
             mine.gameObject.SetActive(true);
             mine.enabled = true;
-            foreach (var cam in FindObjectsByType<Camera>(FindObjectsInactive.Include, FindObjectsSortMode.None))
-                if (cam != mine) cam.enabled = false;
+            // Only turn off a leftover rival WalkCamera (from an old build); never touch the scene's cameras.
+            foreach (var walkCam in FindObjectsByType<DesktopWalkController>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                var rival = walkCam.GetComponentInChildren<Camera>(true);
+                if (rival != null && rival != mine) rival.enabled = false;
+            }
         }
 
         private void HideManagerPanels()
@@ -254,8 +266,13 @@ namespace RouteNavigation
         {
             GUI.Label(new Rect(16f, 12f, 900f, 28f), _status);
 
-            if (!_awaitingRating && walker != null && walker.Walking)
-                GUI.Label(new Rect(16f, 38f, 500f, 28f), $"Time: {walker.ElapsedSeconds:F1}s");
+            // Live diagnostics so we can see what the loop is doing.
+            if (playerRoot != null && goalPoint != null)
+            {
+                float d = Vector3.Distance(Flat(playerRoot.position), Flat(goalPoint.position));
+                string ctl = playerController != null ? (playerController.enabled ? "ON" : "OFF") : "none";
+                GUI.Label(new Rect(16f, 38f, 900f, 28f), $"[debug] distance to goal: {d:F1} m   |   player control: {ctl}");
+            }
 
             if (_awaitingRating)
             {

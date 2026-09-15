@@ -32,6 +32,12 @@ namespace RouteNavigation
         [Tooltip("Fallback walker for scenes with no first-person controller (e.g. FCG).")]
         public DesktopWalkController walker;
 
+        [Header("Participant (set BEFORE pressing Play, for each person)")]
+        [Tooltip("Unique ID per participant. Each person gets their own data folder under LogData. Change this for every participant.")]
+        public string participantId = "P01";
+        [Tooltip("Environment/condition label for this run (e.g. Vol7, FCG, Vol6). Keeps each environment's data separate.")]
+        public string conditionId = "Vol7";
+
         [Header("Tuning")]
         [Tooltip("XZ distance to the goal (metres) that counts as arrived.")]
         public float arriveRadius = 2f;
@@ -50,6 +56,10 @@ namespace RouteNavigation
             _bo = FindAnyObjectByType<BoForUnityManager>();
             if (_bo != null)
             {
+                // Set participant + condition BEFORE the manager reserves its log folder in its Start().
+                // (All Awakes run before any Start, so this always lands in time.)
+                if (!string.IsNullOrWhiteSpace(participantId)) _bo.userId = participantId.Trim();
+                if (!string.IsNullOrWhiteSpace(conditionId)) _bo.conditionId = conditionId.Trim();
                 _bo.reloadSceneOnIterationAdvance = false; // one persistent scene; we loop here
                 SetObjectiveBounds(aestheticsKey, 1f, 10f); // rating scale is 1..10
             }
@@ -292,6 +302,7 @@ namespace RouteNavigation
                 string ctl = playerController != null ? (playerController.enabled ? "ON" : "OFF") : "none";
                 GUI.Label(new Rect(16f, 38f, 900f, 28f), $"[debug] distance to goal: {d:F1} m   |   player control: {ctl}");
             }
+            GUI.Label(new Rect(16f, 64f, 900f, 24f), $"Participant: {participantId}    |    Condition: {conditionId}");
 
             if (_awaitingRating)
             {

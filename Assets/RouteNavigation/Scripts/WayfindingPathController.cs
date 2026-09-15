@@ -150,17 +150,31 @@ namespace RouteNavigation
 
         private List<Vector3> NavMeshRoute(Vector3 start, Vector3 goal)
         {
-            if (navMeshBaker != null && !navMeshBaker.EnsureBaked()) return null;
-            if (!NavMesh.SamplePosition(start, out NavMeshHit sHit, navSampleRadius, NavMesh.AllAreas)) return null;
-            if (!NavMesh.SamplePosition(goal, out NavMeshHit gHit, navSampleRadius, NavMesh.AllAreas)) return null;
+            if (navMeshBaker != null && !navMeshBaker.EnsureBaked())
+            {
+                Debug.LogWarning("[Path] NavMesh route: the subset bake was empty.");
+                return null;
+            }
+            if (!NavMesh.SamplePosition(start, out NavMeshHit sHit, navSampleRadius, NavMesh.AllAreas))
+            {
+                Debug.LogWarning($"[Path] Start is more than {navSampleRadius} m from any walkable navmesh - move PathStart onto the floor.");
+                return null;
+            }
+            if (!NavMesh.SamplePosition(goal, out NavMeshHit gHit, navSampleRadius, NavMesh.AllAreas))
+            {
+                Debug.LogWarning($"[Path] Goal is more than {navSampleRadius} m from any walkable navmesh - move PathGoal onto the floor.");
+                return null;
+            }
 
             var path = new NavMeshPath();
-            if (!NavMesh.CalculatePath(sHit.position, gHit.position, NavMesh.AllAreas, path)) return null;
-            if (path.status != NavMeshPathStatus.PathComplete || path.corners.Length < 2) return null;
-
-            var pts = new List<Vector3>(path.corners.Length);
-            foreach (Vector3 c in path.corners) pts.Add(c);
-            return pts;
+            NavMesh.CalculatePath(sHit.position, gHit.position, NavMesh.AllAreas, path);
+            if (path.status != NavMeshPathStatus.PathComplete || path.corners.Length < 2)
+            {
+                Debug.LogWarning($"[Path] NavMesh path status = {path.status} with {path.corners.Length} corners: " +
+                                 "Start and Goal are not connected on the navmesh (a wall with no doorway path between them, or they are too far apart).");
+                return null;
+            }
+            return new List<Vector3>(path.corners);
         }
 
         // --- Arrow layout ------------------------------------------------------

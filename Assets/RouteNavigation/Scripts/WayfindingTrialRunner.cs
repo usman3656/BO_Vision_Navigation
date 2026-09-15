@@ -146,6 +146,8 @@ namespace RouteNavigation
                     TeleportPlayer(startPoint.position);
                     if (playerController != null) playerController.enabled = true;
                     EnsurePlayerCamera(); // make sure we're looking through the player's own camera
+                    Cursor.lockState = CursorLockMode.Locked; // capture the mouse for first-person look
+                    Cursor.visible = false;
                     yield return WalkFps();
                     walkSeconds = _lastWalkSeconds;
                 }

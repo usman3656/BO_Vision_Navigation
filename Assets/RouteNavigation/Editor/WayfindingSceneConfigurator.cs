@@ -46,7 +46,7 @@ namespace RouteNavigation.EditorTools
             {
                 // WalkTime: seconds, smaller is better. Aesthetics: 1..20, larger is better.
                 new ObjectiveEntry("WalkTime",   new ObjectiveArgs(0f, 60f, true, 1)),
-                new ObjectiveEntry("Aesthetics", new ObjectiveArgs(1f, 20f, false, 1)),
+                new ObjectiveEntry("Aesthetics", new ObjectiveArgs(1f, 10f, false, 1)), // 1..10 rating
             };
 
             bo.numSamplingIterations = 14;   // 2*(6+1); auto-recomputed for 6 params anyway
@@ -63,7 +63,7 @@ namespace RouteNavigation.EditorTools
 
             Debug.Log("[Config] BO manager configured for wayfinding.\n" +
                       "Parameters: R, G, B, Opacity, Size, Height (all 0..1).\n" +
-                      "Objectives: WalkTime (min, 0..60 s) + Aesthetics (max, 1..20).\n" +
+                      "Objectives: WalkTime (min, 0..60 s) + Aesthetics (max, 1..10).\n" +
                       "Seed 42, ExternalSignal advance, backend = MetaTAF (Require Sources OFF), " +
                       "~14 Sobol + 5 optimization = 19 trials.");
         }

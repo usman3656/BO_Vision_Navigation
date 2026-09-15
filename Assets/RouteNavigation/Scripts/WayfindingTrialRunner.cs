@@ -41,14 +41,18 @@ namespace RouteNavigation
         private BoForUnityManager _bo;
         private bool _awaitingRating;
         private bool _ratingConfirmed;
-        private int _rating = 10;
+        private int _rating = 5;
         private string _status = "Starting up...";
         private int _trial;
 
         private void Awake()
         {
             _bo = FindAnyObjectByType<BoForUnityManager>();
-            if (_bo != null) _bo.reloadSceneOnIterationAdvance = false; // one persistent scene; we loop here
+            if (_bo != null)
+            {
+                _bo.reloadSceneOnIterationAdvance = false; // one persistent scene; we loop here
+                SetObjectiveBounds(aestheticsKey, 1f, 10f); // rating scale is 1..10
+            }
 
             if (playerRoot == null) AutoFindFirstPersonPlayer();
             if (playerRoot != null)
@@ -134,7 +138,7 @@ namespace RouteNavigation
                 if (useFps && playerController != null) playerController.enabled = false;
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
-                _rating = 10;
+                _rating = 5;
                 _ratingConfirmed = false;
                 _awaitingRating = true;
                 while (!_ratingConfirmed) yield return null;
@@ -246,6 +250,21 @@ namespace RouteNavigation
                 if (o?.value?.values != null) o.value.values.Clear();
         }
 
+        private void SetObjectiveBounds(string key, float low, float high)
+        {
+            if (_bo?.objectives == null) return;
+            foreach (var o in _bo.objectives)
+            {
+                if (o?.value == null || string.IsNullOrWhiteSpace(o.key)) continue;
+                if (string.Equals(o.key.Trim(), key.Trim(), System.StringComparison.OrdinalIgnoreCase))
+                {
+                    o.value.lowerBound = low;
+                    o.value.upperBound = high;
+                    return;
+                }
+            }
+        }
+
         private bool AddObjectiveByKey(string key, float value)
         {
             if (_bo?.objectives == null) return false;
@@ -276,31 +295,27 @@ namespace RouteNavigation
 
             if (_awaitingRating)
             {
-                float w = Mathf.Min(940f, Screen.width * 0.92f);
-                float h = 320f;
+                float w = Mathf.Min(1000f, Screen.width * 0.95f);
+                float h = 360f;
                 var box = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
                 GUI.Box(box, GUIContent.none);
 
-                var title = new GUIStyle(GUI.skin.label) { fontSize = 26, alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, wordWrap = true };
-                var bigNum = new GUIStyle(GUI.skin.label) { fontSize = 64, alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
-                var numBtn = new GUIStyle(GUI.skin.button) { fontSize = 20, fontStyle = FontStyle.Bold };
-                var confirmBtn = new GUIStyle(GUI.skin.button) { fontSize = 26, fontStyle = FontStyle.Bold };
+                var title = new GUIStyle(GUI.skin.label) { fontSize = 30, alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, wordWrap = true };
+                var bigNum = new GUIStyle(GUI.skin.label) { fontSize = 90, alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
+                var numBtn = new GUIStyle(GUI.skin.button) { fontSize = 30, fontStyle = FontStyle.Bold };
+                var confirmBtn = new GUIStyle(GUI.skin.button) { fontSize = 30, fontStyle = FontStyle.Bold };
 
-                GUILayout.BeginArea(new Rect(box.x + 20f, box.y + 14f, w - 40f, h - 28f));
-                GUILayout.Label("Rate how this path LOOKS    (1 = ugly,  20 = beautiful)", title);
+                GUILayout.BeginArea(new Rect(box.x + 24f, box.y + 18f, w - 48f, h - 36f));
+                GUILayout.Label("Rate how this path LOOKS    (1 = ugly,  10 = beautiful)", title);
                 GUILayout.Label(_rating.ToString(), bigNum);
 
                 GUILayout.BeginHorizontal();
                 for (int n = 1; n <= 10; n++)
-                    if (GUILayout.Button(n.ToString(), numBtn, GUILayout.Height(46f))) _rating = n;
-                GUILayout.EndHorizontal();
-                GUILayout.BeginHorizontal();
-                for (int n = 11; n <= 20; n++)
-                    if (GUILayout.Button(n.ToString(), numBtn, GUILayout.Height(46f))) _rating = n;
+                    if (GUILayout.Button(n.ToString(), numBtn, GUILayout.Height(66f))) _rating = n;
                 GUILayout.EndHorizontal();
 
-                GUILayout.Space(10f);
-                if (GUILayout.Button("CONFIRM  (score " + _rating + ")", confirmBtn, GUILayout.Height(58f)))
+                GUILayout.Space(14f);
+                if (GUILayout.Button("CONFIRM  (score " + _rating + ")", confirmBtn, GUILayout.Height(70f)))
                     _ratingConfirmed = true;
                 GUILayout.EndArea();
             }

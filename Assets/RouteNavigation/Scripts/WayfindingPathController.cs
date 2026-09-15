@@ -37,12 +37,14 @@ namespace RouteNavigation
         [Range(0f, 1f)] public float size = 0.4f;
         [Range(0f, 1f)] public float height = 0.1f;
 
-        [Header("Real-world ranges the 0..1 params map into")]
-        public float minArrowScale = 0.4f;
-        public float maxArrowScale = 2.5f;
-        public float minSpacing = 1.2f;   // metres between arrows at size 0
-        public float maxSpacing = 3.5f;   // metres between arrows at size 1
-        public float maxHeight = 2.5f;    // metres the arrows float at height 1
+        [Header("Real-world ranges the 0..1 params map into (kept sensible + always visible)")]
+        public float minArrowScale = 0.25f;  // ~0.25 m wide arrow
+        public float maxArrowScale = 0.7f;   // ~0.7 m wide max (smaller than a doorway)
+        public float minSpacing = 0.8f;      // metres between arrows at size 0
+        public float maxSpacing = 2.0f;      // metres between arrows at size 1
+        public float minHeight = 0.05f;      // never below the floor
+        public float maxHeight = 1.5f;       // never above human height
+        [Range(0f, 1f)] public float minOpacity = 0.35f; // never fully transparent
 
         private List<Vector3> _route;
         private Material _mat;
@@ -93,7 +95,8 @@ namespace RouteNavigation
             size = Mathf.Clamp01(sz);
             height = Mathf.Clamp01(ht);
 
-            Color c = new Color(r, g, b, opacity);
+            float a = Mathf.Lerp(minOpacity, 1f, opacity); // keep arrows always visible
+            Color c = new Color(r, g, b, a);
             _mat.color = c;
             if (_mat.HasProperty("_BaseColor")) _mat.SetColor("_BaseColor", c);
 
@@ -154,7 +157,7 @@ namespace RouteNavigation
 
         private void LayoutArrows()
         {
-            float lift = Mathf.Lerp(0f, maxHeight, height);
+            float lift = Mathf.Lerp(minHeight, maxHeight, height);
             float scale = Mathf.Lerp(minArrowScale, maxArrowScale, size);
             float spacing = Mathf.Max(0.3f, Mathf.Lerp(minSpacing, maxSpacing, size));
 

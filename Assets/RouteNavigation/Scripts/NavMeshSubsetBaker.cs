@@ -29,6 +29,11 @@ namespace RouteNavigation
         [Tooltip("Vertical span of the bake box in metres. Must reach above the buildings so they carve the navmesh.")]
         public float verticalExtent = 80f;
 
+        [Header("Geometry")]
+        [Tooltip("Physics Colliders avoids the 'read access' warnings (use for scenes with colliders, e.g. Vol.7). " +
+                 "Automatically falls back to Render Meshes if colliders bake nothing (e.g. FCG).")]
+        public NavMeshCollectGeometry geometry = NavMeshCollectGeometry.PhysicsColliders;
+
         [Header("Result (read-only)")]
         public bool baked;
         public Vector3 lastRegionSize;
@@ -61,24 +66,32 @@ namespace RouteNavigation
             _surface.collectObjects = CollectObjects.Volume;               // only geometry inside the box -> fast subset bake
             _surface.center = transform.InverseTransformPoint(worldCenter); // volume centre in this object's local space
             _surface.size = size;
-            _surface.useGeometry = NavMeshCollectGeometry.RenderMeshes;     // FCG buildings have no colliders
             _surface.agentTypeID = NavMesh.GetSettingsByIndex(0).agentTypeID; // built-in Humanoid
-
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            _surface.BuildNavMesh();
-            sw.Stop();
-
-            var tri = NavMesh.CalculateTriangulation();
-            baked = tri.vertices != null && tri.vertices.Length > 0;
             lastRegionSize = size;
 
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int verts = BakeWith(geometry);
+            // If colliders produced nothing (scene has none, e.g. FCG), fall back to render meshes.
+            if (verts == 0 && geometry == NavMeshCollectGeometry.PhysicsColliders)
+                verts = BakeWith(NavMeshCollectGeometry.RenderMeshes);
+            sw.Stop();
+
+            baked = verts > 0;
             if (!baked)
                 Debug.LogError($"[SubsetBake] Baked an EMPTY navmesh over {sizeX:F0}x{sizeZ:F0} m. " +
-                               "No walkable ground was found in the box - move Start/Goal onto a street or increase margin.");
+                               "No walkable ground was found in the box - move Start/Goal onto walkable floor or increase margin.");
             else
                 Debug.Log($"[SubsetBake] Baked subset {sizeX:F0}x{sizeZ:F0} m around Start-Goal in {sw.ElapsedMilliseconds} ms. " +
-                          $"Walkable vertices: {tri.vertices.Length}.");
+                          $"Walkable vertices: {verts}.");
             return baked;
+        }
+
+        private int BakeWith(NavMeshCollectGeometry geo)
+        {
+            _surface.useGeometry = geo;
+            _surface.BuildNavMesh();
+            var tri = NavMesh.CalculateTriangulation();
+            return tri.vertices != null ? tri.vertices.Length : 0;
         }
 
         [ContextMenu("Bake Subset Now")]

@@ -50,6 +50,11 @@ namespace RouteNavigation
             if (_bo != null) _bo.reloadSceneOnIterationAdvance = false; // one persistent scene; we loop here
 
             if (playerRoot == null) AutoFindFirstPersonPlayer();
+            if (playerRoot != null)
+            {
+                EnsurePlayerCamera();                                   // undo any camera left disabled by an old build
+                if (playerController != null) playerController.enabled = true;
+            }
             StartCoroutine(RunLoop());
         }
 
@@ -82,6 +87,7 @@ namespace RouteNavigation
                 yield break;
             }
 
+            if (useFps) { EnsurePlayerCamera(); TeleportPlayer(startPoint.position); }
             _status = "Starting optimizer (Python), please wait...";
             while (!_bo.initialized && !_bo.optimizationFinished) yield return null;
 
@@ -183,6 +189,19 @@ namespace RouteNavigation
                 rb.position = pos;
             }
             playerRoot.position = pos;
+        }
+
+        /// <summary>Makes the player's own camera the one that renders: enables it, disables every other camera
+        /// (e.g. a leftover rival player's camera or a scene camera an old build disabled).</summary>
+        private void EnsurePlayerCamera()
+        {
+            if (playerRoot == null) return;
+            Camera mine = playerRoot.GetComponentInChildren<Camera>(true);
+            if (mine == null) return; // can't identify the player's camera; leave cameras alone
+            mine.gameObject.SetActive(true);
+            mine.enabled = true;
+            foreach (var cam in FindObjectsByType<Camera>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                if (cam != mine) cam.enabled = false;
         }
 
         private void HideManagerPanels()

@@ -276,14 +276,32 @@ namespace RouteNavigation
 
             if (_awaitingRating)
             {
-                const float w = 560f, h = 160f;
+                float w = Mathf.Min(940f, Screen.width * 0.92f);
+                float h = 320f;
                 var box = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
-                GUI.Box(box, "Rate the PATH APPEARANCE");
-                GUILayout.BeginArea(new Rect(box.x + 20f, box.y + 36f, w - 40f, h - 46f));
-                GUILayout.Label($"1 = ugly,  20 = beautiful.     Your rating: {_rating}");
-                _rating = Mathf.RoundToInt(GUILayout.HorizontalSlider(_rating, 1f, 20f));
-                GUILayout.Space(12f);
-                if (GUILayout.Button("Confirm rating")) _ratingConfirmed = true;
+                GUI.Box(box, GUIContent.none);
+
+                var title = new GUIStyle(GUI.skin.label) { fontSize = 26, alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, wordWrap = true };
+                var bigNum = new GUIStyle(GUI.skin.label) { fontSize = 64, alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
+                var numBtn = new GUIStyle(GUI.skin.button) { fontSize = 20, fontStyle = FontStyle.Bold };
+                var confirmBtn = new GUIStyle(GUI.skin.button) { fontSize = 26, fontStyle = FontStyle.Bold };
+
+                GUILayout.BeginArea(new Rect(box.x + 20f, box.y + 14f, w - 40f, h - 28f));
+                GUILayout.Label("Rate how this path LOOKS    (1 = ugly,  20 = beautiful)", title);
+                GUILayout.Label(_rating.ToString(), bigNum);
+
+                GUILayout.BeginHorizontal();
+                for (int n = 1; n <= 10; n++)
+                    if (GUILayout.Button(n.ToString(), numBtn, GUILayout.Height(46f))) _rating = n;
+                GUILayout.EndHorizontal();
+                GUILayout.BeginHorizontal();
+                for (int n = 11; n <= 20; n++)
+                    if (GUILayout.Button(n.ToString(), numBtn, GUILayout.Height(46f))) _rating = n;
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(10f);
+                if (GUILayout.Button("CONFIRM  (score " + _rating + ")", confirmBtn, GUILayout.Height(58f)))
+                    _ratingConfirmed = true;
                 GUILayout.EndArea();
             }
         }

@@ -6,21 +6,13 @@ using UnityEngine.Rendering;
 namespace RouteNavigation
 {
     /// <summary>
-    /// Draws a guidance path from a Start to a Goal and reacts to the six Bayesian Optimization
-    /// parameters (all 0..1): R, G, B, opacity, size (width), and height above the floor.
+    /// Shows a wayfinding guide as a trail of 3D ARROWS from Start to Goal, and reacts to the six
+    /// Bayesian Optimization parameters (all 0..1): R, G, B, opacity, size (arrow scale + spacing),
+    /// and height (how high the arrows float above the floor).
     ///
-    /// The route itself is fixed. By default it follows the baked NavMesh shortest walkable path
-    /// between Start and Goal (bake a subset first with NavMeshSubsetBaker so the FCG city doesn't
-    /// hang). Dijkstra and a straight line are kept as fallbacks. The route is computed once and
-    /// cached; the six parameters only change the appearance, so they are cheap to set every trial.
-    ///
-    /// SETUP:
-    ///   1. Add this component to an empty GameObject (a LineRenderer is added automatically).
-    ///   2. Waypoints: element 0 = Start, last = Goal.
-    ///   3. Routing = NavMesh (default). Assign a NavMeshSubsetBaker so it bakes the subset first.
-    ///   4. Press Play. The optimizer calls ApplyParameters(...) each trial; the sliders preview it.
+    /// The route is computed once (NavMesh shortest path over a baked subset, or Dijkstra, or straight)
+    /// and cached; the six parameters only change how the arrows look, so they are cheap to set per trial.
     /// </summary>
-    [RequireComponent(typeof(LineRenderer))]
     public class WayfindingPathController : MonoBehaviour
     {
         public enum RoutingMode { NavMesh, Dijkstra, Straight }
@@ -30,9 +22,9 @@ namespace RouteNavigation
 
         [Header("Routing")]
         public RoutingMode routing = RoutingMode.NavMesh;
-        [Tooltip("NavMesh mode: optional. If set, bakes the subset NavMesh around Start-Goal before routing.")]
+        [Tooltip("NavMesh mode: bakes the subset NavMesh around Start-Goal before routing.")]
         public NavMeshSubsetBaker navMeshBaker;
-        [Tooltip("NavMesh mode: how far (metres) to snap Start/Goal onto the nearest walkable navmesh point.")]
+        [Tooltip("NavMesh mode: how far to snap Start/Goal onto the nearest walkable navmesh point.")]
         public float navSampleRadius = 5f;
         [Tooltip("Dijkstra mode only: grid pathfinder used to route around buildings.")]
         public DijkstraGridPathfinder pathfinder;
@@ -42,18 +34,21 @@ namespace RouteNavigation
         [Range(0f, 1f)] public float g = 0.6f;
         [Range(0f, 1f)] public float b = 1f;
         [Range(0f, 1f)] public float opacity = 1f;
-        [Range(0f, 1f)] public float size = 0.3f;
-        [Range(0f, 1f)] public float height = 0f;
+        [Range(0f, 1f)] public float size = 0.4f;
+        [Range(0f, 1f)] public float height = 0.1f;
 
         [Header("Real-world ranges the 0..1 params map into")]
-        public float minWidth = 0.05f;
-        public float maxWidth = 0.6f;
-        public float maxHeight = 2.5f;
-        public int sampleCount = 48;
+        public float minArrowScale = 0.4f;
+        public float maxArrowScale = 2.5f;
+        public float minSpacing = 1.2f;   // metres between arrows at size 0
+        public float maxSpacing = 3.5f;   // metres between arrows at size 1
+        public float maxHeight = 2.5f;    // metres the arrows float at height 1
 
-        private LineRenderer _lr;
+        private List<Vector3> _route;
         private Material _mat;
-        private List<Vector3> _route;   // cached route centerline (world XZ + base Y)
+        private Mesh _arrowMesh;
+        private Transform _arrowParent;
+        private readonly List<GameObject> _arrows = new List<GameObject>();
 
         private void Awake()
         {
@@ -61,44 +56,51 @@ namespace RouteNavigation
             RebuildRoute();
         }
 
-        /// <summary>Lazily sets up the LineRenderer and material, so ApplyParameters is safe even if the optimizer calls it before Awake.</summary>
         private void EnsureInit()
         {
-            if (_lr == null)
+            if (_arrowMesh == null) _arrowMesh = BuildArrowMesh();
+            if (_mat == null) _mat = CreateArrowMaterial();
+            if (_arrowParent == null)
             {
-                _lr = GetComponent<LineRenderer>();
-                _lr.alignment = LineAlignment.TransformZ;   // stereo-consistent in VR
-                _lr.useWorldSpace = true;
-                _lr.numCornerVertices = 4;
-                _lr.numCapVertices = 4;
-                _lr.generateLightingData = false;
-                _lr.shadowCastingMode = ShadowCastingMode.Off;
+                var go = new GameObject("Arrows");
+                go.transform.SetParent(transform, false);
+                _arrowParent = go.transform;
             }
-            if (_mat == null)
-            {
-                _mat = CreateTransparentUnlit();
-                _lr.material = _mat;
-            }
-        }
-
-        private void OnValidate()
-        {
-            if (_lr != null && _mat != null && Application.isPlaying)
-                ApplyParameters(r, g, b, opacity, size, height);
         }
 
         private void OnDestroy()
         {
             if (_mat != null) Destroy(_mat);
+            if (_arrowMesh != null) Destroy(_arrowMesh);
         }
 
-        /// <summary>Recomputes the fixed route (Dijkstra shortest path around buildings, or straight). Call when Start or Goal move.</summary>
+        /// <summary>Recomputes the fixed route. Call when Start or Goal move.</summary>
         public void RebuildRoute()
         {
+            EnsureInit();
             _route = ComputeRoute();
-            if (_lr != null && _mat != null)
-                ApplyParameters(r, g, b, opacity, size, height);
+            ApplyParameters(r, g, b, opacity, size, height);
         }
+
+        /// <summary>The optimizer calls this each trial with the six parameters.</summary>
+        public void ApplyParameters(float rr, float gg, float bb, float op, float sz, float ht)
+        {
+            EnsureInit();
+            r = Mathf.Clamp01(rr);
+            g = Mathf.Clamp01(gg);
+            b = Mathf.Clamp01(bb);
+            opacity = Mathf.Clamp01(op);
+            size = Mathf.Clamp01(sz);
+            height = Mathf.Clamp01(ht);
+
+            Color c = new Color(r, g, b, opacity);
+            _mat.color = c;
+            if (_mat.HasProperty("_BaseColor")) _mat.SetColor("_BaseColor", c);
+
+            LayoutArrows();
+        }
+
+        // --- Route computation -------------------------------------------------
 
         private List<Vector3> ComputeRoute()
         {
@@ -109,15 +111,14 @@ namespace RouteNavigation
             if (raw.Count < 2) return null;
 
             Vector3 start = raw[0], goal = raw[raw.Count - 1];
-
             switch (routing)
             {
                 case RoutingMode.NavMesh:
                 {
                     List<Vector3> nav = NavMeshRoute(start, goal);
                     if (nav != null && nav.Count >= 2) return nav;
-                    Debug.LogWarning("[Path] NavMesh route failed: nothing baked, Start/Goal off the navmesh, or the path only partly reached the Goal. " +
-                                     "If the subset box is clipping the route around a building, increase the NavMeshSubsetBaker margin. Drawing a straight line for now.");
+                    Debug.LogWarning("[Path] NavMesh route failed: nothing baked, Start/Goal off the navmesh, or only a partial path. " +
+                                     "If the subset box clips the route around a building, increase the NavMeshSubsetBaker margin. Drawing a straight line for now.");
                     return raw;
                 }
                 case RoutingMode.Dijkstra:
@@ -134,18 +135,14 @@ namespace RouteNavigation
             }
         }
 
-        /// <summary>Shortest walkable path across the baked NavMesh, as a list of corner points, or null if none.</summary>
         private List<Vector3> NavMeshRoute(Vector3 start, Vector3 goal)
         {
             if (navMeshBaker != null && !navMeshBaker.EnsureBaked()) return null;
-
             if (!NavMesh.SamplePosition(start, out NavMeshHit sHit, navSampleRadius, NavMesh.AllAreas)) return null;
             if (!NavMesh.SamplePosition(goal, out NavMeshHit gHit, navSampleRadius, NavMesh.AllAreas)) return null;
 
             var path = new NavMeshPath();
             if (!NavMesh.CalculatePath(sHit.position, gHit.position, NavMesh.AllAreas, path)) return null;
-            // PathPartial means it could not fully reach the Goal (often the subset box clipped a detour around a building).
-            // Reject it so we don't silently draw a path that stops short; the caller falls back and warns.
             if (path.status != NavMeshPathStatus.PathComplete || path.corners.Length < 2) return null;
 
             var pts = new List<Vector3>(path.corners.Length);
@@ -153,71 +150,107 @@ namespace RouteNavigation
             return pts;
         }
 
-        /// <summary>The optimizer calls this each trial with the six parameters.</summary>
-        public void ApplyParameters(float rr, float gg, float bb, float op, float sz, float ht)
+        // --- Arrow layout ------------------------------------------------------
+
+        private void LayoutArrows()
         {
-            r = Mathf.Clamp01(rr);
-            g = Mathf.Clamp01(gg);
-            b = Mathf.Clamp01(bb);
-            opacity = Mathf.Clamp01(op);
-            size = Mathf.Clamp01(sz);
-            height = Mathf.Clamp01(ht);
-
-            DrawRoute();
-            _lr.widthMultiplier = Mathf.Lerp(minWidth, maxWidth, size);
-            _mat.SetColor("_BaseColor", new Color(r, g, b, opacity));
-        }
-
-        private void DrawRoute()
-        {
-            List<Vector3> center = _route;
-            if (center == null || center.Count < 2)
-            {
-                _lr.positionCount = 0;
-                return;
-            }
-
-            var seg = new float[center.Count - 1];
-            float total = 0f;
-            for (int i = 1; i < center.Count; i++)
-            {
-                seg[i - 1] = Vector3.Distance(center[i - 1], center[i]);
-                total += seg[i - 1];
-            }
-            if (total < 1e-4f)
-            {
-                _lr.positionCount = 0;
-                return;
-            }
-
-            int n = Mathf.Max(2, sampleCount);
-            _lr.positionCount = n;
             float lift = Mathf.Lerp(0f, maxHeight, height);
-            for (int k = 0; k < n; k++)
+            float scale = Mathf.Lerp(minArrowScale, maxArrowScale, size);
+            float spacing = Mathf.Max(0.3f, Mathf.Lerp(minSpacing, maxSpacing, size));
+
+            int used = 0;
+            if (_route != null && _route.Count >= 2)
             {
-                float t = (float)k / (n - 1);
-                float target = t * total;
-                float acc = 0f;
-                int s = 0;
-                while (s < seg.Length - 1 && acc + seg[s] < target) { acc += seg[s]; s++; }
-                float f = seg[s] > 1e-4f ? (target - acc) / seg[s] : 0f;
-                Vector3 p = Vector3.Lerp(center[s], center[s + 1], f);
-                p.y += lift * Mathf.Sin(t * Mathf.PI); // 0 at the ends, peaks in the middle
-                _lr.SetPosition(k, p);
+                float travelled = 0f;
+                float nextAt = spacing * 0.5f; // first arrow a little way in from the start
+                for (int i = 1; i < _route.Count; i++)
+                {
+                    Vector3 a = _route[i - 1], b2 = _route[i];
+                    Vector3 seg = b2 - a;
+                    float segLen = seg.magnitude;
+                    if (segLen < 1e-4f) continue;
+
+                    Vector3 flatDir = new Vector3(seg.x, 0f, seg.z);
+                    if (flatDir.sqrMagnitude < 1e-6f) { travelled += segLen; continue; }
+                    Quaternion rot = Quaternion.LookRotation(flatDir.normalized, Vector3.up);
+
+                    while (nextAt <= travelled + segLen)
+                    {
+                        float t = (nextAt - travelled) / segLen;
+                        Vector3 pos = Vector3.Lerp(a, b2, t) + Vector3.up * lift;
+                        GameObject arrow = GetArrow(used++);
+                        arrow.transform.SetPositionAndRotation(pos, rot);
+                        arrow.transform.localScale = Vector3.one * scale;
+                        nextAt += spacing;
+                    }
+                    travelled += segLen;
+                }
             }
+
+            for (int i = used; i < _arrows.Count; i++)
+                if (_arrows[i] != null && _arrows[i].activeSelf) _arrows[i].SetActive(false);
         }
 
-        private Material CreateTransparentUnlit()
+        private GameObject GetArrow(int index)
+        {
+            while (_arrows.Count <= index) _arrows.Add(CreateArrow());
+            GameObject go = _arrows[index];
+            if (!go.activeSelf) go.SetActive(true);
+            return go;
+        }
+
+        private GameObject CreateArrow()
+        {
+            var go = new GameObject("Arrow");
+            go.transform.SetParent(_arrowParent, false);
+            var mf = go.AddComponent<MeshFilter>();
+            mf.sharedMesh = _arrowMesh;
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = _mat;
+            mr.shadowCastingMode = ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+            return go;
+        }
+
+        /// <summary>A flat 3D arrow lying in the local XZ plane, pointing +Z (double-sided material).</summary>
+        private static Mesh BuildArrowMesh()
+        {
+            var mesh = new Mesh { name = "GuidanceArrow" };
+            Vector3[] v =
+            {
+                new Vector3( 0.0f, 0f,  0.5f), // 0 tip
+                new Vector3(-0.5f, 0f,  0.1f), // 1 left barb
+                new Vector3( 0.5f, 0f,  0.1f), // 2 right barb
+                new Vector3(-0.2f, 0f,  0.1f), // 3 left shoulder
+                new Vector3( 0.2f, 0f,  0.1f), // 4 right shoulder
+                new Vector3(-0.2f, 0f, -0.5f), // 5 left tail
+                new Vector3( 0.2f, 0f, -0.5f), // 6 right tail
+            };
+            int[] tris =
+            {
+                0, 1, 2,   // head
+                3, 4, 6,   // shaft
+                3, 6, 5,
+            };
+            mesh.vertices = v;
+            mesh.triangles = tris;
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static Material CreateArrowMaterial()
         {
             Shader sh = Shader.Find("Universal Render Pipeline/Unlit");
-            if (sh == null) sh = Shader.Find("Sprites/Default");
             if (sh == null) sh = Shader.Find("Unlit/Color");
+            if (sh == null) sh = Shader.Find("Sprites/Default");
             var mat = new Material(sh);
-            mat.SetFloat("_Surface", 1f);
+            mat.SetFloat("_Surface", 1f);                              // transparent
             mat.SetFloat("_Blend", 0f);
             mat.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
             mat.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
             mat.SetFloat("_ZWrite", 0f);
+            mat.SetFloat("_Cull", 0f);                                 // double-sided so arrows are visible from any angle
             mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             mat.renderQueue = (int)RenderQueue.Transparent;
             return mat;

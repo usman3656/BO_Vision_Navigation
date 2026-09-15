@@ -317,6 +317,15 @@ namespace RouteNavigation
             }
             GUI.Label(new Rect(16f, 64f, 900f, 24f), $"Participant: {participantId}    |    Condition: {conditionId}");
 
+            if (path != null && !path.RouteValid)
+            {
+                var warn = new GUIStyle(GUI.skin.label) { fontSize = 20, fontStyle = FontStyle.Bold, wordWrap = true };
+                GUI.color = Color.yellow;
+                GUI.Label(new Rect(16f, 90f, 900f, 60f),
+                    "No valid walkable path - arrows hidden. Move Start/Goal onto connected floor, or raise the NavMeshSubsetBaker margin.", warn);
+                GUI.color = Color.white;
+            }
+
             if (_awaitingStart)
             {
                 float bw = 440f, bh = 170f;

@@ -81,16 +81,10 @@ namespace RouteNavigation.EditorTools
                 File.WriteAllText(Path.Combine(Dir, scene + "_start.pose.json"), JsonUtility.ToJson(sp));
                 AssetDatabase.Refresh();
 
-                if (!playing)
-                {
-                    CreateOrUpdateStartMarker(sp);
-                    Debug.Log($"[Start] Saved {imgPath}, saved the pose, and placed the green PathStart marker at that spot.");
-                }
-                else
-                {
-                    Debug.Log($"[Start] Saved {imgPath} and the pose. You captured in Play mode, so STOP Play and run " +
-                              "Tools > BO Route > Place Start Marker to drop the PathStart marker at this exact spot.");
-                }
+                // NOTE: capturing no longer moves or creates PathStart. The start image is taken independently,
+                // so an already-placed PathStart is never disturbed. Use "Place Start Marker" only if you
+                // deliberately want to drop PathStart at the captured pose.
+                Debug.Log($"[Start] Saved {imgPath} and the start pose. PathStart was left untouched.");
             }
             finally
             {

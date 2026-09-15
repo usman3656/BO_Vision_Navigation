@@ -43,10 +43,14 @@ namespace RouteNavigation
         public float minSpacing = 0.8f;      // metres between arrows at size 0
         public float maxSpacing = 2.0f;      // metres between arrows at size 1
         public float minHeight = 0.05f;      // never below the floor
-        public float maxHeight = 1.5f;       // never above human height
+        public float maxHeight = 0.9f;       // waist height at most, so a person always sees them
         [Range(0f, 1f)] public float minOpacity = 0.35f; // never fully transparent
 
+        /// <summary>True when a real walkable route was found (not a through-wall straight-line fallback).</summary>
+        public bool RouteValid { get; private set; } = true;
+
         private List<Vector3> _route;
+        private bool _navRouteOk = true;
         private Material _mat;
         private Mesh _arrowMesh;
         private Transform _arrowParent;
@@ -81,6 +85,12 @@ namespace RouteNavigation
         {
             EnsureInit();
             _route = ComputeRoute();
+            RouteValid = _navRouteOk;
+            if (!RouteValid)
+                Debug.LogWarning($"[Path] {routing}: no valid walkable route found - arrows hidden (won't draw through walls). " +
+                                 "Move Start/Goal onto connected walkable floor, or increase the NavMeshSubsetBaker margin.");
+            else
+                Debug.Log($"[Path] Route via {routing}: {(_route != null ? _route.Count : 0)} corner points.");
             ApplyParameters(r, g, b, opacity, size, height);
         }
 
@@ -107,6 +117,7 @@ namespace RouteNavigation
 
         private List<Vector3> ComputeRoute()
         {
+            _navRouteOk = false;
             if (waypoints == null || waypoints.Length < 2) return null;
             var raw = new List<Vector3>(waypoints.Length);
             foreach (var w in waypoints)
@@ -119,21 +130,20 @@ namespace RouteNavigation
                 case RoutingMode.NavMesh:
                 {
                     List<Vector3> nav = NavMeshRoute(start, goal);
-                    if (nav != null && nav.Count >= 2) return nav;
-                    Debug.LogWarning("[Path] NavMesh route failed: nothing baked, Start/Goal off the navmesh, or only a partial path. " +
-                                     "If the subset box clips the route around a building, increase the NavMeshSubsetBaker margin. Drawing a straight line for now.");
-                    return raw;
+                    if (nav != null && nav.Count >= 2) { _navRouteOk = true; return nav; }
+                    return raw; // flagged invalid -> arrows are hidden, no through-wall line
                 }
                 case RoutingMode.Dijkstra:
                 {
                     if (pathfinder != null)
                     {
                         List<Vector3> route = pathfinder.FindPath(start, goal);
-                        if (route != null && route.Count >= 2) return route;
+                        if (route != null && route.Count >= 2) { _navRouteOk = true; return route; }
                     }
                     return raw;
                 }
                 default:
+                    _navRouteOk = true; // a straight line is intentional in Straight mode
                     return raw;
             }
         }
@@ -162,7 +172,7 @@ namespace RouteNavigation
             float spacing = Mathf.Max(0.3f, Mathf.Lerp(minSpacing, maxSpacing, size));
 
             int used = 0;
-            if (_route != null && _route.Count >= 2)
+            if (_navRouteOk && _route != null && _route.Count >= 2)
             {
                 float travelled = 0f;
                 float nextAt = spacing * 0.5f; // first arrow a little way in from the start

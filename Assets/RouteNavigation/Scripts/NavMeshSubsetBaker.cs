@@ -30,9 +30,9 @@ namespace RouteNavigation
         public float verticalExtent = 80f;
 
         [Header("Geometry")]
-        [Tooltip("Physics Colliders avoids the 'read access' warnings (use for scenes with colliders, e.g. Vol.7). " +
-                 "Automatically falls back to Render Meshes if colliders bake nothing (e.g. FCG).")]
-        public NavMeshCollectGeometry geometry = NavMeshCollectGeometry.PhysicsColliders;
+        [Tooltip("Render Meshes carves walls/furniture out of the navmesh so routes go AROUND them (indoor scenes). " +
+                 "It logs harmless 'read access' warnings in the editor. Falls back to Physics Colliders if it bakes nothing.")]
+        public NavMeshCollectGeometry geometry = NavMeshCollectGeometry.RenderMeshes;
 
         [Header("Result (read-only)")]
         public bool baked;
@@ -71,9 +71,11 @@ namespace RouteNavigation
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             int verts = BakeWith(geometry);
-            // If colliders produced nothing (scene has none, e.g. FCG), fall back to render meshes.
-            if (verts == 0 && geometry == NavMeshCollectGeometry.PhysicsColliders)
-                verts = BakeWith(NavMeshCollectGeometry.RenderMeshes);
+            // If the chosen geometry produced nothing, try the other kind.
+            if (verts == 0)
+                verts = BakeWith(geometry == NavMeshCollectGeometry.RenderMeshes
+                    ? NavMeshCollectGeometry.PhysicsColliders
+                    : NavMeshCollectGeometry.RenderMeshes);
             sw.Stop();
 
             baked = verts > 0;

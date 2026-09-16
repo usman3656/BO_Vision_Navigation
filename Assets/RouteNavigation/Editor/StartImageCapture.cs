@@ -20,8 +20,7 @@ namespace RouteNavigation.EditorTools
     /// </summary>
     public static class StartImageCapture
     {
-        private const int Size = 1024;      // square, so nothing is lost when the embedder center-crops
-        private const float Fov = 80f;      // wide-angle
+        private const int MaxWidth = 1920;  // cap the width; the image keeps the view's aspect ratio
         private const float EyeHeight = 1.6f;
         private const string Dir = "Assets/RouteNavigation/StartImages";
 
@@ -55,20 +54,28 @@ namespace RouteNavigation.EditorTools
             string scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
             if (string.IsNullOrEmpty(scene)) scene = "Untitled";
 
-            var rt = new RenderTexture(Size, Size, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+            // Match the framing you see: use the Scene view camera's FOV + aspect (or the Game screen in
+            // Play mode), instead of a forced wide square that made everything look small and centred.
+            int w, h; float useFov;
+            if (!playing) { w = svCam.pixelWidth; h = svCam.pixelHeight; useFov = svCam.fieldOfView; }
+            else { w = Screen.width; h = Screen.height; useFov = main.fieldOfView; }
+            if (w < 16 || h < 16) { w = 1600; h = 900; }
+            if (w > MaxWidth) { float s = MaxWidth / (float)w; w = MaxWidth; h = Mathf.Max(16, Mathf.RoundToInt(h * s)); }
+
+            var rt = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
             Texture2D tex = null;
             try
             {
                 if (!playing)
                     main.transform.SetPositionAndRotation(svCam.transform.position, svCam.transform.rotation);
-                main.fieldOfView = Fov;
+                main.fieldOfView = useFov;
                 main.targetTexture = rt;
                 main.Render();
 
                 RenderTexture prevActive = RenderTexture.active;
                 RenderTexture.active = rt;
-                tex = new Texture2D(Size, Size, TextureFormat.RGB24, false);
-                tex.ReadPixels(new Rect(0, 0, Size, Size), 0, 0);
+                tex = new Texture2D(w, h, TextureFormat.RGB24, false);
+                tex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
                 tex.Apply();
                 RenderTexture.active = prevActive;
 

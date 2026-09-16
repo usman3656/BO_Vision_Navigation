@@ -37,11 +37,16 @@ namespace RouteNavigation
                  "Falls back to Render Meshes automatically if colliders bake nothing (e.g. FCG).")]
         public NavMeshCollectGeometry geometry = NavMeshCollectGeometry.PhysicsColliders;
 
+        [Header("Debug view (Scene view, during Play)")]
+        [Tooltip("Draws the ACTUAL runtime navmesh in cyan, with a green cross at Start and red cross at Goal, so you can see if they are on the same connected piece.")]
+        public bool drawNavMesh = true;
+
         [Header("Result (read-only)")]
         public bool baked;
         public Vector3 lastRegionSize;
 
         private NavMeshDataInstance _instance;
+        private NavMeshTriangulation _tri;
 
         private void Awake() => EnsureBaked();
         private void OnDestroy() { if (_instance.valid) NavMesh.RemoveNavMeshData(_instance); }
@@ -104,7 +109,39 @@ namespace RouteNavigation
             _instance = NavMesh.AddNavMeshData(data);
 
             NavMeshTriangulation tri = NavMesh.CalculateTriangulation();
+            _tri = tri;
             return tri.vertices != null ? tri.vertices.Length : 0;
+        }
+
+        private void Update()
+        {
+            if (!drawNavMesh) return;
+            Vector3[] v = _tri.vertices;
+            int[] idx = _tri.indices;
+            if (v != null && idx != null)
+            {
+                for (int i = 0; i + 2 < idx.Length; i += 3)
+                {
+                    Vector3 a = v[idx[i]], b = v[idx[i + 1]], c = v[idx[i + 2]];
+                    Debug.DrawLine(a, b, Color.cyan, 0f, false);
+                    Debug.DrawLine(b, c, Color.cyan, 0f, false);
+                    Debug.DrawLine(c, a, Color.cyan, 0f, false);
+                }
+            }
+            if (startPoint != null) DrawSnapCross(startPoint.position, Color.green);
+            if (goalPoint != null) DrawSnapCross(goalPoint.position, Color.red);
+        }
+
+        /// <summary>Draws a vertical marker at the point and a cross where it snaps onto the navmesh.</summary>
+        private void DrawSnapCross(Vector3 p, Color col)
+        {
+            Debug.DrawLine(p, p + Vector3.up * 2.5f, col, 0f, false);
+            if (NavMesh.SamplePosition(p, out NavMeshHit hit, 10f, NavMesh.AllAreas))
+            {
+                Debug.DrawLine(p, hit.position, Color.white, 0f, false);
+                Debug.DrawLine(hit.position + Vector3.left * 0.4f, hit.position + Vector3.right * 0.4f, col, 0f, false);
+                Debug.DrawLine(hit.position + Vector3.forward * 0.4f, hit.position + Vector3.back * 0.4f, col, 0f, false);
+            }
         }
 
         [ContextMenu("Bake Subset Now")]

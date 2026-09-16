@@ -66,8 +66,6 @@ namespace RouteNavigation.EditorTools
         [MenuItem("Tools/BO Route/Add Path Waypoint Here (Scene view)")]
         public static void AddWaypointHere()
         {
-            var ctrl = FindController();
-            if (ctrl == null) { Debug.LogError("[Build] Run 'Build Wayfinding Test Objects' first."); return; }
             var sv = SceneView.lastActiveSceneView;
             if (sv == null) { Debug.LogError("[Build] Open a Scene view, frame the floor spot (press F), then run this."); return; }
 
@@ -82,12 +80,22 @@ namespace RouteNavigation.EditorTools
             SetMaterial(wp, MakeUnlit(Color.cyan));
             wp.transform.position = sv.pivot;
             SnapToGround(wp.transform);
-
-            RebuildWaypointArray(ctrl);
             Selection.activeGameObject = wp;
+
+            // Works whether or not GuidancePath exists yet: if it does, update the route now;
+            // otherwise the waypoint is stored under PathWaypoints and picked up when you run Build.
+            var ctrl = FindController();
+            if (ctrl != null)
+            {
+                RebuildWaypointArray(ctrl);
+                Debug.Log($"[Build] Added {wp.name}. Route now has {ctrl.waypoints.Length} points. Move it with W to fine-tune.");
+            }
+            else
+            {
+                Debug.Log($"[Build] Added {wp.name} (#{n}). Set PathStart/PathGoal and run 'Build Wayfinding Test Objects' " +
+                          "to assemble the route — your waypoints are included automatically.");
+            }
             EditorSceneManager.MarkAllScenesDirty();
-            Debug.Log($"[Build] Added {wp.name}. Route now has {ctrl.waypoints.Length} points " +
-                      $"(Start + {ctrl.waypoints.Length - 2} waypoint(s) + Goal). Move it with W to fine-tune.");
         }
 
         [MenuItem("Tools/BO Route/Clear Path Waypoints")]

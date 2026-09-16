@@ -57,6 +57,20 @@ namespace RouteNavigation
         private void Awake()
         {
             _bo = FindAnyObjectByType<BoForUnityManager>();
+            if (_bo == null)
+            {
+                // No manager saved in this scene (e.g. the Vol.7 scene has markers+runner but no manager):
+                // spawn one from Resources so the study still runs on a plain Play. Self-healing = never
+                // depends on the BO manager being saved in the scene.
+                var prefab = Resources.Load<GameObject>("BOforUnityManager");
+                if (prefab != null)
+                {
+                    var go = Instantiate(prefab);
+                    go.name = "BOforUnityManager";
+                    _bo = go.GetComponentInChildren<BoForUnityManager>(true);
+                }
+                if (_bo == null) _bo = FindAnyObjectByType<BoForUnityManager>();
+            }
             if (_bo != null) ConfigureManager(_bo); // full config at runtime, before the manager's Start() -> no menus needed
 
             // Self-wire any missing references so the runner works even if Build didn't connect them.
@@ -408,12 +422,23 @@ namespace RouteNavigation
 
             if (_awaitingStart)
             {
-                float bw = 440f, bh = 170f;
+                float bw = 460f, bh = 260f;
                 var b = new Rect((Screen.width - bw) / 2f, (Screen.height - bh) / 2f, bw, bh);
                 GUI.Box(b, GUIContent.none);
+
+                var lbl = new GUIStyle(GUI.skin.label) { fontSize = 20, alignment = TextAnchor.MiddleLeft };
+                var fld = new GUIStyle(GUI.skin.textField) { fontSize = 22, fontStyle = FontStyle.Bold };
+                GUI.Label(new Rect(b.x + 30f, b.y + 20f, bw - 60f, 26f), $"Participant ID   (Condition: {conditionId})", lbl);
+                participantId = GUI.TextField(new Rect(b.x + 30f, b.y + 50f, bw - 60f, 40f), participantId, fld);
+
                 var startStyle = new GUIStyle(GUI.skin.button) { fontSize = 42, fontStyle = FontStyle.Bold };
-                if (GUI.Button(new Rect(b.x + 30f, b.y + 34f, bw - 60f, bh - 68f), "▶  START", startStyle))
+                if (GUI.Button(new Rect(b.x + 30f, b.y + 108f, bw - 60f, bh - 140f), "▶  START", startStyle))
+                {
+                    if (string.IsNullOrWhiteSpace(participantId)) participantId = "P01";
+                    participantId = participantId.Trim();
+                    if (_bo != null) _bo.userId = participantId;
                     _startPressed = true;
+                }
                 return;
             }
 

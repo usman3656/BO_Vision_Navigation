@@ -1,0 +1,2 @@
+UserID;ConditionID;GroupID;Timestamp;Iteration;Phase;IsPareto;WalkTime;Aesthetics;R;G;B;Opacity;Size;Height
+trial_2;Vol7;-1;2026-09-16 06:45:24;1;sampling;FALSE;7.131;5.0;0.431;0.814;0.806;0.053;0.298;0.84

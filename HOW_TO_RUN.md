@@ -12,26 +12,44 @@ Backend: **MetaTAF** (the `openbo` fork) via BOforUnity.
   - run `Assets/StreamingAssets/BOData/Installation/MacOs/install_python.sh`
   - then `python3 -m pip install --user "open-bo @ git+https://github.com/M-Colley/openbo@main"`
 
-## Run it (one click)
-1. Open the project in Unity.
-2. Open the scene: `Assets/ArchVizPRO_Interior_Vol.7_URP/3D SCENE/ArchVizPRO_Interior_Vol.7_URP.unity`
-3. In the Hierarchy select **TrialRunner** → set **Participant Id** (and **Condition Id**, e.g. `Vol7`).
-4. Press **Play**, wait ~10–30 s for Python, then click **START**.
-5. Walk to the **red goal** (WASD + mouse) following the arrows → rate the look **1–10** → repeat
-   (~19 trials). The whole thing self-configures on Play — no editor menus needed.
+## Run it — literally just Play (both environments)
+
+Everything is built **in code** on Play (`WayfindingBootstrap`): the BO manager, the Start/Goal
+markers, the arrow path, and the trial runner are all created and wired automatically. **Nothing
+needs to be set up in the scene.**
+
+**Indoor (ArchVizPRO Vol.7):**
+1. Open `Assets/ArchVizPRO_Interior_Vol.7_URP/3D SCENE/ArchVizPRO_Interior_Vol.7_URP.unity`
+2. Press **Play**, wait ~10–30 s for Python to start.
+3. Type a **Participant ID** on the start panel (or leave the default), click **START**.
+4. Walk to the **red goal** (WASD + mouse) following the arrows → rate the look **1–10** → repeat
+   (~19 trials).
+
+**Outdoor (Fantastic City Generator):**
+1. Open `Assets/Fantastic City Generator/Scenes/Scene-Demo.unity`
+2. Press **Play**, type a Participant ID, click **START**, walk to the goal, rate 1–10, repeat.
+   (A simple desktop walker is spawned automatically since this scene has no first-person player.)
+
+The **Condition** label (Vol7 / FCG) is set automatically per scene, so each environment's data
+stays separate.
 
 ## Where the data goes
-- **One master file:** `Assets/StreamingAssets/BOData/LogData/AllTrials_master.csv`
+- **One master file (every trial, every participant, both environments):**
+  `Assets/StreamingAssets/BOData/LogData/AllTrials_master.csv`
   — one row per trial: `Timestamp; Participant; Condition; Trial; WalkTimeSeconds; Aesthetics; R; G; B; Opacity; Size; Height`.
 - Per‑run detail: `LogData/<participant>/<condition>/run/ObservationsPerEvaluation.csv`
   (plus `HypervolumePerEvaluation.csv`, `ExecutionTimes.csv`).
 
-## Editor tools (only needed to change the route, under **Tools > BO Route**)
-- **Set Path Start Here / Set Path Goal Here** — drop the start/goal markers at the Scene‑view focus.
-- **Add Path Waypoint Here** — drop a waypoint along the route.
-- **Snap ALL Path Points to Ground** — drop every point onto its floor.
-- **Build Wayfinding Test Objects** — (re)create + wire GuidancePath and TrialRunner.
-- **Hide BO Manager UI** — turn off the BO tool's canvas.
+## Changing the route (only if you want to move Start/Goal/waypoints)
+The route coordinates are hardcoded in **`Assets/RouteNavigation/Scripts/WayfindingBootstrap.cs`**
+(one entry per scene: `start`, `goal`, `waypoints`). Edit them there and the change is permanent —
+no scene save needed. Alternatively, place `PathStart` / `PathGoal` markers in the scene and the
+bootstrap will use those instead.
 
-The route is a set of hand‑placed waypoints (green Start, red Goal, cyan waypoints) that the
-arrows follow; only the arrows' appearance changes each trial.
+The optimizer settings (6 parameters, 2 objectives, seed 42, MetaTAF) are hardcoded in
+`WayfindingTrialRunner.cs` and applied on Play — no editor menus are required.
+
+## Study design (environments)
+ViT‑B‑32 image embeddings of the three start views (see `Assets/RouteNavigation/Embeddings/`) put the
+two interiors close together and both far from the outdoor city. Plan: **optimize on Vol.7 + FCG**,
+**transfer‑test on Vol.6** using the MetaTAF population models built from the two optimize runs.

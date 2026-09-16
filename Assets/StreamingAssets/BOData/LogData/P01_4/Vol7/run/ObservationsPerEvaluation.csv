@@ -1,0 +1,5 @@
+UserID;ConditionID;GroupID;Timestamp;Iteration;Phase;IsPareto;WalkTime;Aesthetics;R;G;B;Opacity;Size;Height
+P01_4;Vol7;-1;2026-09-16 07:28:44;1;sampling;FALSE;20.032;5.0;0.431;0.814;0.806;0.053;0.298;0.84
+P01_4;Vol7;-1;2026-09-16 07:29:05;2;sampling;FALSE;14.683;9.0;0.912;0.173;0.252;0.693;0.888;0.37
+P01_4;Vol7;-1;2026-09-16 07:29:22;3;sampling;FALSE;13.282;2.0;0.514;0.529;0.696;0.395;0.658;0.02
+P01_4;Vol7;-1;2026-09-16 07:29:38;4;sampling;FALSE;11.252;3.0;0.018;0.482;0.238;0.852;0.029;0.549

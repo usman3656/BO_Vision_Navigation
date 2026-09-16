@@ -59,12 +59,14 @@ namespace RouteNavigation
             HideWaypointMeshes(); // in the game, show only the arrows; markers stay visible in the Scene view (gizmos)
         }
 
-        /// <summary>Hides the Start/Goal/waypoint spheres during play. The route still shows in the Scene view via OnDrawGizmos.</summary>
+        /// <summary>Hides only the INTERMEDIATE waypoint spheres during play. Start (first) and Goal (last)
+        /// markers stay visible in the game. The full route still shows in the Scene view via OnDrawGizmos.</summary>
         private void HideWaypointMeshes()
         {
             if (waypoints == null) return;
-            foreach (Transform w in waypoints)
+            for (int i = 1; i < waypoints.Length - 1; i++) // keep index 0 (Start) and last (Goal) visible
             {
+                Transform w = waypoints[i];
                 if (w == null) continue;
                 foreach (var mr in w.GetComponentsInChildren<MeshRenderer>(true))
                     mr.enabled = false;

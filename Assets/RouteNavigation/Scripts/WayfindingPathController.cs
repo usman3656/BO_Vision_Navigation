@@ -41,7 +41,7 @@ namespace RouteNavigation
         public float maxSpacing = 2.0f;       // metres between arrows at size 1
         [Range(0f, 1f)] public float minOpacity = 0.35f; // never fully transparent
         public float minHeight = 0.02f;       // basically on the floor
-        public float maxHeight = 0.15f;       // just above the floor at most
+        public float maxHeight = 0.9f;        // up to about waist height (floor-pinned, so it can't reach the ceiling)
 
         /// <summary>True when a drawable route (>= 2 points) exists.</summary>
         public bool RouteValid { get; private set; }

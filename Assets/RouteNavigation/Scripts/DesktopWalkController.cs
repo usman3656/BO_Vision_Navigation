@@ -16,7 +16,7 @@ namespace RouteNavigation
     public class DesktopWalkController : MonoBehaviour
     {
         [Header("Movement")]
-        public float moveSpeed = 3f;
+        public float moveSpeed = 15f;   // ~5x, for covering the large outdoor FCG map quickly
         public float lookSpeed = 2f;
         public float eyeHeight = 1.6f;
         [Tooltip("XZ distance to the goal (metres) that counts as 'arrived'.")]
@@ -62,6 +62,14 @@ namespace RouteNavigation
         public void Begin(Transform goal)
         {
             _goal = goal;
+            // Face the goal so the arrow trail is ahead of the player at the start.
+            if (goal != null)
+            {
+                Vector3 dir = goal.position - transform.position; dir.y = 0f;
+                if (dir.sqrMagnitude > 0.01f) transform.rotation = Quaternion.LookRotation(dir.normalized, Vector3.up);
+            }
+            _pitch = 0f;
+            if (Cam != null) Cam.transform.localRotation = Quaternion.identity;
             Finished = false;
             Walking = true;
             _timing = false;

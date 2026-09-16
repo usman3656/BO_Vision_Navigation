@@ -328,30 +328,22 @@ namespace RouteNavigation
             if (!string.IsNullOrWhiteSpace(conditionId)) bo.conditionId = conditionId.Trim();
             bo.reloadSceneOnIterationAdvance = false;
 
-            if (bo.parameters == null || bo.parameters.Count != 6)
+            // ALWAYS overwrite params + objectives so the study is correct in ANY scene, even if the
+            // manager still had the demo objectives (e.g. FCG had 'Trust' etc.).
+            bo.parameters = new List<ParameterEntry>
             {
-                bo.parameters = new List<ParameterEntry>
-                {
-                    new ParameterEntry("R",       new ParameterArgs(0f, 1f)),
-                    new ParameterEntry("G",       new ParameterArgs(0f, 1f)),
-                    new ParameterEntry("B",       new ParameterArgs(0f, 1f)),
-                    new ParameterEntry("Opacity", new ParameterArgs(0f, 1f)),
-                    new ParameterEntry("Size",    new ParameterArgs(0f, 1f)),
-                    new ParameterEntry("Height",  new ParameterArgs(0f, 1f)),
-                };
-            }
-            if (bo.objectives == null || bo.objectives.Count != 2)
+                new ParameterEntry("R",       new ParameterArgs(0f, 1f)),
+                new ParameterEntry("G",       new ParameterArgs(0f, 1f)),
+                new ParameterEntry("B",       new ParameterArgs(0f, 1f)),
+                new ParameterEntry("Opacity", new ParameterArgs(0f, 1f)),
+                new ParameterEntry("Size",    new ParameterArgs(0f, 1f)),
+                new ParameterEntry("Height",  new ParameterArgs(0f, 1f)),
+            };
+            bo.objectives = new List<ObjectiveEntry>
             {
-                bo.objectives = new List<ObjectiveEntry>
-                {
-                    new ObjectiveEntry("WalkTime",   new ObjectiveArgs(0f, 60f, true, 1)),
-                    new ObjectiveEntry("Aesthetics", new ObjectiveArgs(1f, 10f, false, 1)),
-                };
-            }
-            else
-            {
-                SetObjectiveBounds(aestheticsKey, 1f, 10f);
-            }
+                new ObjectiveEntry("WalkTime",   new ObjectiveArgs(0f, 60f, true, 1)),
+                new ObjectiveEntry("Aesthetics", new ObjectiveArgs(1f, 10f, false, 1)),
+            };
 
             bo.numSamplingIterations = 14;
             bo.numOptimizationIterations = 5;

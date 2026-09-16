@@ -178,6 +178,23 @@ namespace RouteNavigation.EditorTools
 
         // --- Build -------------------------------------------------------------
 
+        [MenuItem("Tools/BO Route/Hide BO Manager UI (removes the white/pink canvas)")]
+        public static void HideBoUi()
+        {
+            var go = GameObject.Find("BOControlCanvas");
+            if (go == null)
+            {
+                foreach (var c in Object.FindObjectsByType<Canvas>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+                    if (c.renderMode == RenderMode.ScreenSpaceOverlay) { go = c.gameObject; break; }
+            }
+            if (go == null) { Debug.LogWarning("[Build] No BO manager UI canvas found in the scene."); return; }
+            Undo.RecordObject(go, "Hide BO UI");
+            go.SetActive(false);
+            EditorSceneManager.MarkAllScenesDirty();
+            Debug.Log($"[Build] Deactivated '{go.name}'. The BO manager's white/pink UI is now gone from the Scene view and the game. " +
+                      "The study uses its own on-screen UI (status/START/rating). Re-enable it in the Hierarchy if you ever need it.");
+        }
+
         [MenuItem("Tools/BO Route/Build Wayfinding Test Objects")]
         public static void BuildObjects()
         {

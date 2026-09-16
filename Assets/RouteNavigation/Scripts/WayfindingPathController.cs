@@ -22,8 +22,8 @@ namespace RouteNavigation
     {
         [Header("Route: element 0 = Start, middle = waypoints, last = Goal")]
         public Transform[] waypoints;
-        [Tooltip("Smooth the route into a curve through the waypoints instead of straight segments.")]
-        public bool smoothPath = true;
+        [Tooltip("Smooth the route into a curve through the waypoints. Off = straight segments between waypoints.")]
+        public bool smoothPath = false;
         [Range(2, 20)] public int smoothingPerSegment = 8;
 
         [Header("Parameters (0..1) - the optimizer sets these")]
@@ -41,7 +41,7 @@ namespace RouteNavigation
         public float maxSpacing = 2.0f;       // metres between arrows at size 1
         [Range(0f, 1f)] public float minOpacity = 0.35f; // never fully transparent
         public float minHeight = 0.02f;       // basically on the floor
-        public float maxHeight = 1.5f;        // ground up to ~chest/eye level (floor-pinned, so it can't reach the ceiling)
+        public float maxHeight = 0.9f;        // ground up to ~waist height (floor-pinned, so it can't reach the ceiling)
 
         /// <summary>True when a drawable route (>= 2 points) exists.</summary>
         public bool RouteValid { get; private set; }

@@ -61,6 +61,13 @@ namespace RouteNavigation
 
             // Self-wire any missing references so the runner works even if Build didn't connect them.
             if (path == null) path = FindAnyObjectByType<WayfindingPathController>();
+            if (path != null)
+            {
+                // Enforce the intended look in BOTH scenes, regardless of any old serialized values:
+                path.minHeight = 0.02f;   // on the floor
+                path.maxHeight = 0.9f;    // up to waist height
+                path.smoothPath = false;  // straight segments between waypoints
+            }
             if (startPoint == null) { var s = GameObject.Find("PathStart"); if (s != null) startPoint = s.transform; }
             if (goalPoint == null) { var g = GameObject.Find("PathGoal"); if (g != null) goalPoint = g.transform; }
 

@@ -1,12 +1,11 @@
 using UnityEngine;
-using UnityEngine.AI;
 
 namespace RouteNavigation
 {
     /// <summary>
     /// Minimal desktop first-person walker for testing the wayfinding path without a headset.
-    /// WASD to move, mouse to look. No colliders are required: the player snaps to the baked
-    /// NavMesh for ground height, so it works on FCG (no colliders) and indoor scenes alike.
+    /// WASD to move, mouse to look. It spawns EXACTLY at the start marker (no navmesh snap) and
+    /// follows the floor via a downward raycast where colliders exist.
     ///
     /// It times the walk from the FIRST movement to arrival at the goal, which the trial runner
     /// reads back as the "walk time" objective.
@@ -22,8 +21,6 @@ namespace RouteNavigation
         public float eyeHeight = 1.6f;
         [Tooltip("XZ distance to the goal (metres) that counts as 'arrived'.")]
         public float arriveRadius = 1.5f;
-        [Tooltip("How far to search the navmesh for ground height under the player.")]
-        public float groundSnap = 4f;
 
         public Camera Cam { get; private set; }
         public bool Finished { get; private set; }
@@ -50,7 +47,7 @@ namespace RouteNavigation
         public void ResetTo(Transform startPose)
         {
             Vector3 p = startPose.position;
-            if (NavMesh.SamplePosition(p, out NavMeshHit hit, groundSnap, NavMesh.AllAreas)) p = hit.position;
+            p.y = GroundY(p, p.y);   // floor height, but keep EXACT X/Z (no sideways navmesh snap)
             transform.position = p;
             transform.rotation = Quaternion.Euler(0f, startPose.eulerAngles.y, 0f);
             _pitch = 0f;
@@ -99,8 +96,7 @@ namespace RouteNavigation
             {
                 _timing = true; // the clock starts on the first movement
                 Vector3 pos = transform.position + move.normalized * moveSpeed * Time.deltaTime;
-                if (NavMesh.SamplePosition(pos, out NavMeshHit hit, groundSnap, NavMesh.AllAreas))
-                    pos.y = hit.position.y;
+                pos.y = GroundY(pos, transform.position.y); // follow the floor where colliders exist, else keep height
                 transform.position = pos;
             }
 
@@ -117,6 +113,12 @@ namespace RouteNavigation
                     StopWalk();
                 }
             }
+        }
+
+        /// <summary>Floor height under a point via a downward raycast; returns the fallback if nothing is hit.</summary>
+        private static float GroundY(Vector3 p, float fallback)
+        {
+            return Physics.Raycast(p + Vector3.up * 1.5f, Vector3.down, out RaycastHit hit, 8f) ? hit.point.y : fallback;
         }
 
         private void LockCursor(bool locked)

@@ -145,6 +145,24 @@ namespace RouteNavigation.EditorTools
                       $"(Start + {ctrl.waypoints.Length - 2} waypoint(s) + Goal). Move it with W to fine-tune; add more along the corridor.");
         }
 
+        [MenuItem("Tools/BO Route/Snap ALL Path Points to Ground")]
+        public static void SnapAllToGround()
+        {
+            int count = 0;
+            foreach (var nm in new[] { "PathStart", "PathGoal" })
+            {
+                var g = GameObject.Find(nm);
+                if (g != null) { Undo.RecordObject(g.transform, "Snap " + nm); SnapToGround(g.transform); count++; }
+            }
+            var holder = GameObject.Find("PathWaypoints");
+            if (holder != null)
+            {
+                foreach (Transform c in holder.transform) { Undo.RecordObject(c, "Snap waypoint"); SnapToGround(c); count++; }
+            }
+            EditorSceneManager.MarkAllScenesDirty();
+            Debug.Log($"[Build] Snapped {count} path point(s) to their nearest floor. Re-check the yellow route line in the Scene view.");
+        }
+
         [MenuItem("Tools/BO Route/Clear Path Waypoints")]
         public static void ClearWaypoints()
         {
@@ -187,20 +205,25 @@ namespace RouteNavigation.EditorTools
         {
             Vector3 p = t.position;
 
-            if (Physics.Raycast(p + Vector3.up * 100f, Vector3.down, out RaycastHit hit, 1000f))
+            // Raycast down from JUST above the placed point (not from far above) so we hit the floor
+            // the user actually framed, NOT an upper storey in a multi-floor building.
+            if (Physics.Raycast(p + Vector3.up * 1.5f, Vector3.down, out RaycastHit hit, 10f))
             {
                 p.y = hit.point.y;
                 t.position = p;
-                Debug.Log($"[Build] {t.name} snapped to the floor collider at y={p.y:F2}.");
+                Debug.Log($"[Build] {t.name} snapped to floor at y={p.y:F2}.");
                 return;
             }
 
+            // Collider-free fallback: the highest mesh surface within ~4 m BELOW the placed point
+            // (so it can't jump to another storey's floor far above or below).
             float bestTop = float.NegativeInfinity;
             foreach (var mr in Object.FindObjectsByType<MeshRenderer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
             {
                 Bounds b = mr.bounds;
                 if (p.x < b.min.x || p.x > b.max.x || p.z < b.min.z || p.z > b.max.z) continue;
-                if (b.max.y > p.y + 0.5f) continue;
+                if (b.max.y > p.y + 0.5f) continue;   // ignore anything above the placement
+                if (b.max.y < p.y - 4f) continue;     // ignore floors far below (other storeys)
                 if (b.max.y > bestTop) bestTop = b.max.y;
             }
 
@@ -208,11 +231,11 @@ namespace RouteNavigation.EditorTools
             {
                 p.y = bestTop;
                 t.position = p;
-                Debug.Log($"[Build] {t.name} snapped to the nearest mesh surface at y={p.y:F2} (no collider; used mesh bounds).");
+                Debug.Log($"[Build] {t.name} snapped to mesh surface at y={p.y:F2}.");
             }
             else
             {
-                Debug.LogWarning($"[Build] {t.name}: no ground found beneath it. Move it over the floor in X/Z first, then snap again.");
+                Debug.LogWarning($"[Build] {t.name}: no floor found just below it. Frame the floor directly (press F on it) and snap again.");
             }
         }
 

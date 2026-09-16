@@ -117,6 +117,24 @@ namespace RouteNavigation
             LayoutArrows();
         }
 
+        /// <summary>Draws the waypoint order in the Scene view (Start=green, Goal=red, middles=cyan) so the
+        /// route is visible without playing - if it zig-zags or jumps floors you can see it immediately.</summary>
+        private void OnDrawGizmos()
+        {
+            if (waypoints == null || waypoints.Length < 2) return;
+            for (int i = 0; i < waypoints.Length; i++)
+            {
+                if (waypoints[i] == null) continue;
+                Gizmos.color = i == 0 ? Color.green : (i == waypoints.Length - 1 ? Color.red : Color.cyan);
+                Gizmos.DrawSphere(waypoints[i].position, 0.2f);
+                if (i > 0 && waypoints[i - 1] != null)
+                {
+                    Gizmos.color = Color.yellow;
+                    Gizmos.DrawLine(waypoints[i - 1].position, waypoints[i].position);
+                }
+            }
+        }
+
         // --- Route computation -------------------------------------------------
 
         private List<Vector3> ComputeRoute()

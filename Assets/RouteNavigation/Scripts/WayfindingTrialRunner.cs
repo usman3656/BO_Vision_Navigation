@@ -253,12 +253,17 @@ namespace RouteNavigation
                 if (cam != mine) cam.enabled = false;
         }
 
+        private Canvas _boCanvas;
+
         private void HideManagerPanels()
         {
             if (_bo == null) return;
             if (_bo.welcomePanel != null) _bo.welcomePanel.SetActive(false);
             if (_bo.optimizerStatePanel != null) _bo.optimizerStatePanel.SetActive(false);
             if (_bo.loadingObj != null) _bo.loadingObj.SetActive(false);
+            // Turn off the whole BO UI canvas so its white/pink overlay never shows during the walk.
+            if (_boCanvas == null && _bo.welcomePanel != null) _boCanvas = _bo.welcomePanel.GetComponentInParent<Canvas>();
+            if (_boCanvas != null) _boCanvas.enabled = false;
         }
 
         private bool TryGetParam(int index, out float value)

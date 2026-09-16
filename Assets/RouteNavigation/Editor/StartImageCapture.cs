@@ -34,10 +34,11 @@ namespace RouteNavigation.EditorTools
             if (main == null) { Debug.LogError("[Start] No camera in the scene to render with."); return; }
 
             bool playing = Application.isPlaying;
+            SceneView sv = null;
             Camera svCam = null;
             if (!playing)
             {
-                var sv = SceneView.lastActiveSceneView;
+                sv = SceneView.lastActiveSceneView;
                 if (sv == null || sv.camera == null)
                 {
                     Debug.LogError("[Start] Open a Scene view and frame the start viewpoint, or press Play and walk to the spot first.");
@@ -67,7 +68,12 @@ namespace RouteNavigation.EditorTools
             try
             {
                 if (!playing)
-                    main.transform.SetPositionAndRotation(svCam.transform.position, svCam.transform.rotation);
+                {
+                    // Reconstruct the CURRENT Scene view viewpoint from its pivot/rotation/distance.
+                    // (sv.camera.transform is stale when read from a menu callback, which captured the wrong spot.)
+                    Vector3 camPos = sv.pivot - (sv.rotation * Vector3.forward) * sv.cameraDistance;
+                    main.transform.SetPositionAndRotation(camPos, sv.rotation);
+                }
                 main.fieldOfView = useFov;
                 main.targetTexture = rt;
                 main.Render();

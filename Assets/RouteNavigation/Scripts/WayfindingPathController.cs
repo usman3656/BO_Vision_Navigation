@@ -46,9 +46,11 @@ namespace RouteNavigation
         public float maxArrowScale = 0.7f;   // ~0.7 m wide max (smaller than a doorway)
         public float minSpacing = 0.8f;      // metres between arrows at size 0
         public float maxSpacing = 2.0f;      // metres between arrows at size 1
-        public float minHeight = 0.05f;      // never below the floor
-        public float maxHeight = 0.9f;       // waist height at most, so a person always sees them
+        public float minHeight = 0.02f;      // basically on the floor
+        public float maxHeight = 0.1f;       // just above the floor at most (kept low so they read as ground arrows)
         [Range(0f, 1f)] public float minOpacity = 0.35f; // never fully transparent
+        [Tooltip("Raycast each arrow down to the floor beneath the route, so arrows never float to another level.")]
+        public bool snapArrowsToFloor = true;
 
         /// <summary>True when a real walkable route was found (not a through-wall straight-line fallback).</summary>
         public bool RouteValid { get; private set; } = true;
@@ -68,6 +70,10 @@ namespace RouteNavigation
 
         private void EnsureInit()
         {
+            // Kill any leftover LineRenderer from the old line-based path (renders as a pink/magenta line with no material).
+            var staleLine = GetComponent<LineRenderer>();
+            if (staleLine != null) staleLine.enabled = false;
+
             if (_arrowMesh == null) _arrowMesh = BuildArrowMesh();
             if (_mat == null) _mat = CreateArrowMaterial();
             if (_arrowParent == null)
@@ -255,7 +261,12 @@ namespace RouteNavigation
                     while (nextAt <= travelled + segLen)
                     {
                         float t = (nextAt - travelled) / segLen;
-                        Vector3 pos = Vector3.Lerp(a, b2, t) + Vector3.up * lift;
+                        Vector3 pos = Vector3.Lerp(a, b2, t);
+                        float baseY = pos.y;
+                        if (snapArrowsToFloor &&
+                            Physics.Raycast(new Vector3(pos.x, pos.y + 1.5f, pos.z), Vector3.down, out RaycastHit fh, 6f))
+                            baseY = fh.point.y; // sit on the actual floor under this point
+                        pos.y = baseY + lift;
                         GameObject arrow = GetArrow(used++);
                         arrow.transform.SetPositionAndRotation(pos, rot);
                         arrow.transform.localScale = Vector3.one * scale;

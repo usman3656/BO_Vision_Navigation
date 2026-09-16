@@ -1,37 +1,30 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.AI;
 using UnityEngine.Rendering;
 
 namespace RouteNavigation
 {
     /// <summary>
-    /// Shows a wayfinding guide as a trail of 3D ARROWS from Start to Goal, and reacts to the six
-    /// Bayesian Optimization parameters (all 0..1): R, G, B, opacity, size (arrow scale + spacing),
-    /// and height (how high the arrows float above the floor).
+    /// Shows a wayfinding guide as a trail of flat 3D arrows along a HAND-PLACED waypoint route:
+    /// waypoints[0] = Start, middle elements = waypoints, last = Goal.
     ///
-    /// The route is computed once (NavMesh shortest path over a baked subset, or Dijkstra, or straight)
-    /// and cached; the six parameters only change how the arrows look, so they are cheap to set per trial.
+    /// The six Bayesian Optimization parameters (all 0..1) change ONLY the appearance:
+    ///   R, G, B  -> arrow colour
+    ///   opacity  -> transparency (never fully invisible)
+    ///   size     -> arrow scale and spacing
+    ///   height   -> small lift off the floor
+    ///
+    /// Arrows always sit on the floor UNDER the Start point (raycast), so they can never climb to
+    /// another storey no matter where the waypoints' Y values are. No NavMesh, no baking.
     /// </summary>
+    [DisallowMultipleComponent]
     public class WayfindingPathController : MonoBehaviour
     {
-        public enum RoutingMode { Waypoints, NavMesh, Dijkstra }
-
         [Header("Route: element 0 = Start, middle = waypoints, last = Goal")]
         public Transform[] waypoints;
-
-        [Header("Routing")]
-        [Tooltip("Waypoints = follow the hand-placed markers in order (recommended, reliable). NavMesh/Dijkstra = auto.")]
-        public RoutingMode routing = RoutingMode.Waypoints;
-        [Tooltip("Waypoints mode: smooth the path into a curve through the waypoints instead of straight segments.")]
+        [Tooltip("Smooth the route into a curve through the waypoints instead of straight segments.")]
         public bool smoothPath = true;
         [Range(2, 20)] public int smoothingPerSegment = 8;
-        [Tooltip("NavMesh mode: bakes the subset NavMesh around Start-Goal before routing.")]
-        public NavMeshSubsetBaker navMeshBaker;
-        [Tooltip("NavMesh mode: how far to snap Start/Goal onto the nearest walkable navmesh point.")]
-        public float navSampleRadius = 5f;
-        [Tooltip("Dijkstra mode only: grid pathfinder used to route around buildings.")]
-        public DijkstraGridPathfinder pathfinder;
 
         [Header("Parameters (0..1) - the optimizer sets these")]
         [Range(0f, 1f)] public float r = 0.2f;
@@ -39,28 +32,25 @@ namespace RouteNavigation
         [Range(0f, 1f)] public float b = 1f;
         [Range(0f, 1f)] public float opacity = 1f;
         [Range(0f, 1f)] public float size = 0.4f;
-        [Range(0f, 1f)] public float height = 0.1f;
+        [Range(0f, 1f)] public float height = 0.2f;
 
-        [Header("Real-world ranges the 0..1 params map into (kept sensible + always visible)")]
-        public float minArrowScale = 0.25f;  // ~0.25 m wide arrow
-        public float maxArrowScale = 0.7f;   // ~0.7 m wide max (smaller than a doorway)
-        public float minSpacing = 0.8f;      // metres between arrows at size 0
-        public float maxSpacing = 2.0f;      // metres between arrows at size 1
-        public float minHeight = 0.02f;      // basically on the floor
-        public float maxHeight = 0.1f;       // just above the floor at most (kept low so they read as ground arrows)
+        [Header("Appearance ranges (kept sensible + always visible)")]
+        public float minArrowScale = 0.25f;   // ~0.25 m wide
+        public float maxArrowScale = 0.7f;    // ~0.7 m wide (smaller than a doorway)
+        public float minSpacing = 0.8f;       // metres between arrows at size 0
+        public float maxSpacing = 2.0f;       // metres between arrows at size 1
         [Range(0f, 1f)] public float minOpacity = 0.35f; // never fully transparent
-        [Tooltip("Raycast each arrow down to the floor beneath the route, so arrows never float to another level.")]
-        public bool snapArrowsToFloor = true;
+        public float minHeight = 0.02f;       // basically on the floor
+        public float maxHeight = 0.15f;       // just above the floor at most
 
-        /// <summary>True when a real walkable route was found (not a through-wall straight-line fallback).</summary>
-        public bool RouteValid { get; private set; } = true;
+        /// <summary>True when a drawable route (>= 2 points) exists.</summary>
+        public bool RouteValid { get; private set; }
 
-        private List<Vector3> _route;
-        private bool _navRouteOk = true;
+        private readonly List<Vector3> _route = new List<Vector3>();
+        private readonly List<GameObject> _arrows = new List<GameObject>();
         private Material _mat;
         private Mesh _arrowMesh;
         private Transform _arrowParent;
-        private readonly List<GameObject> _arrows = new List<GameObject>();
 
         private void Awake()
         {
@@ -68,12 +58,14 @@ namespace RouteNavigation
             RebuildRoute();
         }
 
+        private void OnDestroy()
+        {
+            if (_mat != null) Destroy(_mat);
+            if (_arrowMesh != null) Destroy(_arrowMesh);
+        }
+
         private void EnsureInit()
         {
-            // Kill any leftover LineRenderer from the old line-based path (renders as a pink/magenta line with no material).
-            var staleLine = GetComponent<LineRenderer>();
-            if (staleLine != null) staleLine.enabled = false;
-
             if (_arrowMesh == null) _arrowMesh = BuildArrowMesh();
             if (_mat == null) _mat = CreateArrowMaterial();
             if (_arrowParent == null)
@@ -84,27 +76,15 @@ namespace RouteNavigation
             }
         }
 
-        private void OnDestroy()
-        {
-            if (_mat != null) Destroy(_mat);
-            if (_arrowMesh != null) Destroy(_arrowMesh);
-        }
-
-        /// <summary>Recomputes the fixed route. Call when Start or Goal move.</summary>
+        /// <summary>Recomputes the route from the waypoints. Call when a waypoint moves.</summary>
         public void RebuildRoute()
         {
             EnsureInit();
-            _route = ComputeRoute();
-            RouteValid = _navRouteOk;
-            if (!RouteValid)
-                Debug.LogWarning($"[Path] {routing}: no valid walkable route found - arrows hidden (won't draw through walls). " +
-                                 "Move Start/Goal onto connected walkable floor, or increase the NavMeshSubsetBaker margin.");
-            else
-                Debug.Log($"[Path] Route via {routing}: {(_route != null ? _route.Count : 0)} corner points.");
+            BuildRoute();
             ApplyParameters(r, g, b, opacity, size, height);
         }
 
-        /// <summary>The optimizer calls this each trial with the six parameters.</summary>
+        /// <summary>The optimizer calls this each trial with the six appearance parameters.</summary>
         public void ApplyParameters(float rr, float gg, float bb, float op, float sz, float ht)
         {
             EnsureInit();
@@ -115,7 +95,7 @@ namespace RouteNavigation
             size = Mathf.Clamp01(sz);
             height = Mathf.Clamp01(ht);
 
-            float a = Mathf.Lerp(minOpacity, 1f, opacity); // keep arrows always visible
+            float a = Mathf.Lerp(minOpacity, 1f, opacity);
             Color c = new Color(r, g, b, a);
             _mat.color = c;
             if (_mat.HasProperty("_BaseColor")) _mat.SetColor("_BaseColor", c);
@@ -123,60 +103,23 @@ namespace RouteNavigation
             LayoutArrows();
         }
 
-        /// <summary>Draws the waypoint order in the Scene view (Start=green, Goal=red, middles=cyan) so the
-        /// route is visible without playing - if it zig-zags or jumps floors you can see it immediately.</summary>
-        private void OnDrawGizmos()
+        // --- Route -------------------------------------------------------------
+
+        private void BuildRoute()
         {
+            _route.Clear();
+            RouteValid = false;
             if (waypoints == null || waypoints.Length < 2) return;
-            for (int i = 0; i < waypoints.Length; i++)
-            {
-                if (waypoints[i] == null) continue;
-                Gizmos.color = i == 0 ? Color.green : (i == waypoints.Length - 1 ? Color.red : Color.cyan);
-                Gizmos.DrawSphere(waypoints[i].position, 0.2f);
-                if (i > 0 && waypoints[i - 1] != null)
-                {
-                    Gizmos.color = Color.yellow;
-                    Gizmos.DrawLine(waypoints[i - 1].position, waypoints[i].position);
-                }
-            }
+
+            var pts = new List<Vector3>(waypoints.Length);
+            foreach (Transform w in waypoints)
+                if (w != null) pts.Add(w.position);
+            if (pts.Count < 2) return;
+
+            _route.AddRange(smoothPath && pts.Count >= 3 ? Smooth(pts, smoothingPerSegment) : pts);
+            RouteValid = _route.Count >= 2;
         }
 
-        // --- Route computation -------------------------------------------------
-
-        private List<Vector3> ComputeRoute()
-        {
-            _navRouteOk = false;
-            if (waypoints == null || waypoints.Length < 2) return null;
-            var raw = new List<Vector3>(waypoints.Length);
-            foreach (var w in waypoints)
-                if (w != null) raw.Add(w.position);
-            if (raw.Count < 2) return null;
-
-            Vector3 start = raw[0], goal = raw[raw.Count - 1];
-            switch (routing)
-            {
-                case RoutingMode.NavMesh:
-                {
-                    List<Vector3> nav = NavMeshRoute(start, goal);
-                    if (nav != null && nav.Count >= 2) { _navRouteOk = true; return nav; }
-                    return raw; // flagged invalid -> arrows are hidden, no through-wall line
-                }
-                case RoutingMode.Dijkstra:
-                {
-                    if (pathfinder != null)
-                    {
-                        List<Vector3> route = pathfinder.FindPath(start, goal);
-                        if (route != null && route.Count >= 2) { _navRouteOk = true; return route; }
-                    }
-                    return raw;
-                }
-                default: // Waypoints: follow Start -> waypoints -> Goal, optionally smoothed into a curve.
-                    _navRouteOk = raw.Count >= 2;
-                    return (smoothPath && raw.Count >= 3) ? Smooth(raw, smoothingPerSegment) : raw;
-            }
-        }
-
-        /// <summary>Catmull-Rom smoothing so the arrow trail curves nicely through the waypoints.</summary>
         private static List<Vector3> Smooth(List<Vector3> pts, int seg)
         {
             seg = Mathf.Max(2, seg);
@@ -188,10 +131,7 @@ namespace RouteNavigation
                 Vector3 p2 = pts[i + 1];
                 Vector3 p3 = pts[Mathf.Min(pts.Count - 1, i + 2)];
                 for (int s = 0; s < seg; s++)
-                {
-                    float t = s / (float)seg;
-                    outPts.Add(CatmullRom(p0, p1, p2, p3, t));
-                }
+                    outPts.Add(CatmullRom(p0, p1, p2, p3, s / (float)seg));
             }
             outPts.Add(pts[pts.Count - 1]);
             return outPts;
@@ -205,36 +145,7 @@ namespace RouteNavigation
                 + (-p0 + 3f * p1 - 3f * p2 + p3) * t3);
         }
 
-        private List<Vector3> NavMeshRoute(Vector3 start, Vector3 goal)
-        {
-            if (navMeshBaker != null && !navMeshBaker.EnsureBaked())
-            {
-                Debug.LogWarning("[Path] NavMesh route: the subset bake was empty.");
-                return null;
-            }
-            if (!NavMesh.SamplePosition(start, out NavMeshHit sHit, navSampleRadius, NavMesh.AllAreas))
-            {
-                Debug.LogWarning($"[Path] Start is more than {navSampleRadius} m from any walkable navmesh - move PathStart onto the floor.");
-                return null;
-            }
-            if (!NavMesh.SamplePosition(goal, out NavMeshHit gHit, navSampleRadius, NavMesh.AllAreas))
-            {
-                Debug.LogWarning($"[Path] Goal is more than {navSampleRadius} m from any walkable navmesh - move PathGoal onto the floor.");
-                return null;
-            }
-
-            var path = new NavMeshPath();
-            NavMesh.CalculatePath(sHit.position, gHit.position, NavMesh.AllAreas, path);
-            if (path.status != NavMeshPathStatus.PathComplete || path.corners.Length < 2)
-            {
-                Debug.LogWarning($"[Path] NavMesh path status = {path.status} with {path.corners.Length} corners: " +
-                                 "Start and Goal are not connected on the navmesh (a wall with no doorway path between them, or they are too far apart).");
-                return null;
-            }
-            return new List<Vector3>(path.corners);
-        }
-
-        // --- Arrow layout ------------------------------------------------------
+        // --- Arrows ------------------------------------------------------------
 
         private void LayoutArrows()
         {
@@ -243,37 +154,24 @@ namespace RouteNavigation
             float spacing = Mathf.Max(0.3f, Mathf.Lerp(minSpacing, maxSpacing, size));
 
             int used = 0;
-            if (_navRouteOk && _route != null && _route.Count >= 2)
+            if (RouteValid)
             {
-                // Reference floor = the floor under the START point. All arrows sit on THIS storey, so they can
-                // never climb to the roof/another level even if a waypoint's Y was placed high.
-                float floorY = _route[0].y;
-                if (Physics.Raycast(_route[0] + Vector3.up * 1.5f, Vector3.down, out RaycastHit startHit, 8f))
-                    floorY = startHit.point.y;
-
+                float floorY = FloorYUnder(_route[0]); // the storey the Start sits on
                 float travelled = 0f;
-                float nextAt = spacing * 0.5f; // first arrow a little way in from the start
+                float nextAt = spacing * 0.5f;
                 for (int i = 1; i < _route.Count; i++)
                 {
-                    Vector3 a = _route[i - 1], b2 = _route[i];
-                    Vector3 seg = b2 - a;
+                    Vector3 A = _route[i - 1], B = _route[i];
+                    Vector3 seg = B - A; seg.y = 0f;             // horizontal only
                     float segLen = seg.magnitude;
                     if (segLen < 1e-4f) continue;
-
-                    Vector3 flatDir = new Vector3(seg.x, 0f, seg.z);
-                    if (flatDir.sqrMagnitude < 1e-6f) { travelled += segLen; continue; }
-                    Quaternion rot = Quaternion.LookRotation(flatDir.normalized, Vector3.up);
+                    Quaternion rot = Quaternion.LookRotation(seg / segLen, Vector3.up);
 
                     while (nextAt <= travelled + segLen)
                     {
                         float t = (nextAt - travelled) / segLen;
-                        Vector3 pos = Vector3.Lerp(a, b2, t);
-                        float y = floorY;
-                        if (snapArrowsToFloor &&
-                            Physics.Raycast(new Vector3(pos.x, floorY + 2f, pos.z), Vector3.down, out RaycastHit fh, 5f) &&
-                            Mathf.Abs(fh.point.y - floorY) < 2f)
-                            y = fh.point.y; // follow small floor variation, but ONLY on the start storey (never the roof)
-                        pos.y = y + lift;
+                        Vector3 pos = Vector3.Lerp(A, B, t);
+                        pos.y = FloorYAt(pos.x, pos.z, floorY) + lift; // sit on the Start storey
                         GameObject arrow = GetArrow(used++);
                         arrow.transform.SetPositionAndRotation(pos, rot);
                         arrow.transform.localScale = Vector3.one * scale;
@@ -285,6 +183,21 @@ namespace RouteNavigation
 
             for (int i = used; i < _arrows.Count; i++)
                 if (_arrows[i] != null && _arrows[i].activeSelf) _arrows[i].SetActive(false);
+        }
+
+        /// <summary>Floor height directly under a point (raycast just above it, so it hits the local floor).</summary>
+        private static float FloorYUnder(Vector3 p)
+        {
+            return Physics.Raycast(p + Vector3.up * 1.5f, Vector3.down, out RaycastHit hit, 8f) ? hit.point.y : p.y;
+        }
+
+        /// <summary>Floor height at an XZ, but only accepted if it's on the same storey as floorY (never the roof).</summary>
+        private static float FloorYAt(float x, float z, float floorY)
+        {
+            if (Physics.Raycast(new Vector3(x, floorY + 2f, z), Vector3.down, out RaycastHit hit, 5f)
+                && Mathf.Abs(hit.point.y - floorY) < 2f)
+                return hit.point.y;
+            return floorY;
         }
 
         private GameObject GetArrow(int index)
@@ -299,8 +212,7 @@ namespace RouteNavigation
         {
             var go = new GameObject("Arrow");
             go.transform.SetParent(_arrowParent, false);
-            var mf = go.AddComponent<MeshFilter>();
-            mf.sharedMesh = _arrowMesh;
+            go.AddComponent<MeshFilter>().sharedMesh = _arrowMesh;
             var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterial = _mat;
             mr.shadowCastingMode = ShadowCastingMode.Off;
@@ -312,7 +224,7 @@ namespace RouteNavigation
         private static Mesh BuildArrowMesh()
         {
             var mesh = new Mesh { name = "GuidanceArrow" };
-            Vector3[] v =
+            mesh.vertices = new[]
             {
                 new Vector3( 0.0f, 0f,  0.5f), // 0 tip
                 new Vector3(-0.5f, 0f,  0.1f), // 1 left barb
@@ -322,14 +234,7 @@ namespace RouteNavigation
                 new Vector3(-0.2f, 0f, -0.5f), // 5 left tail
                 new Vector3( 0.2f, 0f, -0.5f), // 6 right tail
             };
-            int[] tris =
-            {
-                0, 1, 2,   // head
-                3, 4, 6,   // shaft
-                3, 6, 5,
-            };
-            mesh.vertices = v;
-            mesh.triangles = tris;
+            mesh.triangles = new[] { 0, 1, 2, 3, 4, 6, 3, 6, 5 };
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             return mesh;
@@ -341,15 +246,32 @@ namespace RouteNavigation
             if (sh == null) sh = Shader.Find("Unlit/Color");
             if (sh == null) sh = Shader.Find("Sprites/Default");
             var mat = new Material(sh);
-            mat.SetFloat("_Surface", 1f);                              // transparent
+            mat.SetFloat("_Surface", 1f);                               // transparent
             mat.SetFloat("_Blend", 0f);
             mat.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
             mat.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
             mat.SetFloat("_ZWrite", 0f);
-            mat.SetFloat("_Cull", 0f);                                 // double-sided so arrows are visible from any angle
+            mat.SetFloat("_Cull", 0f);                                  // double-sided
             mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             mat.renderQueue = (int)RenderQueue.Transparent;
             return mat;
+        }
+
+        /// <summary>Draws the waypoint order in the Scene view (green Start, red Goal, cyan middles, yellow links).</summary>
+        private void OnDrawGizmos()
+        {
+            if (waypoints == null || waypoints.Length < 2) return;
+            for (int i = 0; i < waypoints.Length; i++)
+            {
+                if (waypoints[i] == null) continue;
+                Gizmos.color = i == 0 ? Color.green : (i == waypoints.Length - 1 ? Color.red : Color.cyan);
+                Gizmos.DrawSphere(waypoints[i].position, 0.2f);
+                if (i > 0 && waypoints[i - 1] != null)
+                {
+                    Gizmos.color = Color.yellow;
+                    Gizmos.DrawLine(waypoints[i - 1].position, waypoints[i].position);
+                }
+            }
         }
     }
 }

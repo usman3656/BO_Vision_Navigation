@@ -7,18 +7,19 @@ using UnityEngine;
 namespace RouteNavigation.EditorTools
 {
     /// <summary>
-    /// Beginner-friendly setup for the wayfinding test.
-    ///
-    /// Menus (Tools > BO Route > ...):
-    ///   Set Path Start Here (Scene view)  - drops a bright GREEN glowing beacon at the Scene view focus.
-    ///   Set Path Goal Here (Scene view)   - drops a bright RED glowing beacon at the Scene view focus.
-    ///   Snap PathStart/PathGoal to Ground - drops the marker onto the floor beneath it.
-    ///   Build Wayfinding Test Objects      - wires GuidancePath (path + NavMesh subset baker + Dijkstra) and
-    ///                                        TrialRunner, uses the scene's own first-person player, and makes
-    ///                                        sure the scene camera is enabled.
+    /// One-stop setup for the waypoint-based wayfinding test (Tools > BO Route > ...):
+    ///   Set Path Start / Goal Here     - drop a glowing beacon at the Scene-view focus (snapped to floor).
+    ///   Add Path Waypoint Here          - drop a cyan waypoint along the route (snapped to floor).
+    ///   Snap PathStart/Goal/ALL         - re-drop points onto their local floor.
+    ///   Clear Path Waypoints            - remove the intermediate waypoints.
+    ///   Build Wayfinding Test Objects   - (re)creates GuidancePath (WayfindingPathController) + TrialRunner,
+    ///                                     wires the route Start -> waypoints -> Goal, re-enables the camera,
+    ///                                     and uses the scene's own FirstPersonAIO player.
     /// </summary>
     public static class WayfindingSceneBuilder
     {
+        // --- Markers -----------------------------------------------------------
+
         [MenuItem("Tools/BO Route/Set Path Start Here (Scene view)")]
         public static void SetStartHere() => PlaceMarker("PathStart", Color.green);
 
@@ -30,11 +31,9 @@ namespace RouteNavigation.EditorTools
             var sv = SceneView.lastActiveSceneView;
             if (sv == null)
             {
-                Debug.LogError("[Build] Open a Scene view first, frame the spot (hover it and press F), then run this menu.");
+                Debug.LogError("[Build] Open a Scene view, frame the floor spot (hover it and press F), then run this.");
                 return;
             }
-
-            Vector3 pos = sv.pivot;
             var go = GameObject.Find(markerName);
             if (go == null)
             {
@@ -42,17 +41,14 @@ namespace RouteNavigation.EditorTools
                 Undo.RegisterCreatedObjectUndo(go, "Create " + markerName);
                 BuildBeacon(go, color);
             }
-
             Undo.RecordObject(go.transform, "Move " + markerName);
-            go.transform.position = pos;
+            go.transform.position = sv.pivot;
             SnapToGround(go.transform);
             Selection.activeGameObject = go;
             EditorSceneManager.MarkAllScenesDirty();
-            Debug.Log($"[Build] {markerName} placed at {go.transform.position} as a glowing beacon. " +
-                      "Fine-tune with the Move tool (W), then 'Snap " + markerName + " to Ground' again.");
+            Debug.Log($"[Build] {markerName} placed at {go.transform.position}.");
         }
 
-        /// <summary>Builds a bright, unlit sphere + tall thin pillar so the marker is visible from anywhere.</summary>
         private static void BuildBeacon(GameObject root, Color color)
         {
             Material mat = MakeUnlit(color);
@@ -68,10 +64,187 @@ namespace RouteNavigation.EditorTools
             var beam = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             beam.name = "Beacon";
             beam.transform.SetParent(root.transform, false);
-            beam.transform.localPosition = Vector3.up * 2f;          // base near the floor, rising up
+            beam.transform.localPosition = Vector3.up * 2f;
             beam.transform.localScale = new Vector3(0.12f, 2f, 0.12f); // ~4 m tall, thin
             StripCollider(beam);
             SetMaterial(beam, mat);
+        }
+
+        // --- Waypoints ---------------------------------------------------------
+
+        [MenuItem("Tools/BO Route/Add Path Waypoint Here (Scene view)")]
+        public static void AddWaypointHere()
+        {
+            var ctrl = FindController();
+            if (ctrl == null) { Debug.LogError("[Build] Run 'Build Wayfinding Test Objects' first."); return; }
+            var sv = SceneView.lastActiveSceneView;
+            if (sv == null) { Debug.LogError("[Build] Open a Scene view, frame the floor spot (press F), then run this."); return; }
+
+            var holder = FindOrCreate("PathWaypoints");
+            int n = holder.transform.childCount + 1;
+            var wp = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            wp.name = "PathWaypoint " + n;
+            Undo.RegisterCreatedObjectUndo(wp, "Add Waypoint");
+            StripCollider(wp);
+            wp.transform.SetParent(holder.transform, true);
+            wp.transform.localScale = Vector3.one * 0.3f;
+            SetMaterial(wp, MakeUnlit(Color.cyan));
+            wp.transform.position = sv.pivot;
+            SnapToGround(wp.transform);
+
+            RebuildWaypointArray(ctrl);
+            Selection.activeGameObject = wp;
+            EditorSceneManager.MarkAllScenesDirty();
+            Debug.Log($"[Build] Added {wp.name}. Route now has {ctrl.waypoints.Length} points " +
+                      $"(Start + {ctrl.waypoints.Length - 2} waypoint(s) + Goal). Move it with W to fine-tune.");
+        }
+
+        [MenuItem("Tools/BO Route/Clear Path Waypoints")]
+        public static void ClearWaypoints()
+        {
+            var holder = GameObject.Find("PathWaypoints");
+            if (holder != null) Undo.DestroyObjectImmediate(holder);
+            var ctrl = FindController();
+            if (ctrl != null) RebuildWaypointArray(ctrl);
+            EditorSceneManager.MarkAllScenesDirty();
+            Debug.Log("[Build] Cleared intermediate waypoints. Route is Start -> Goal.");
+        }
+
+        /// <summary>Sets the controller's route to Start + PathWaypoints children (in order) + Goal.</summary>
+        private static void RebuildWaypointArray(WayfindingPathController ctrl)
+        {
+            var start = GameObject.Find("PathStart");
+            var goal = GameObject.Find("PathGoal");
+            if (ctrl == null || start == null || goal == null) return;
+
+            var list = new List<Transform> { start.transform };
+            var holder = GameObject.Find("PathWaypoints");
+            if (holder != null)
+                foreach (Transform c in holder.transform) list.Add(c);
+            list.Add(goal.transform);
+
+            Undo.RecordObject(ctrl, "Rebuild route");
+            ctrl.waypoints = list.ToArray();
+        }
+
+        // --- Ground snapping ---------------------------------------------------
+
+        [MenuItem("Tools/BO Route/Snap PathStart to Ground")]
+        public static void SnapStart() => SnapNamed("PathStart");
+
+        [MenuItem("Tools/BO Route/Snap PathGoal to Ground")]
+        public static void SnapGoal() => SnapNamed("PathGoal");
+
+        [MenuItem("Tools/BO Route/Snap ALL Path Points to Ground")]
+        public static void SnapAllToGround()
+        {
+            int count = 0;
+            foreach (var nm in new[] { "PathStart", "PathGoal" })
+            {
+                var g = GameObject.Find(nm);
+                if (g != null) { Undo.RecordObject(g.transform, "Snap " + nm); SnapToGround(g.transform); count++; }
+            }
+            var holder = GameObject.Find("PathWaypoints");
+            if (holder != null)
+                foreach (Transform c in holder.transform) { Undo.RecordObject(c, "Snap waypoint"); SnapToGround(c); count++; }
+            EditorSceneManager.MarkAllScenesDirty();
+            Debug.Log($"[Build] Snapped {count} path point(s) to their nearest floor.");
+        }
+
+        private static void SnapNamed(string markerName)
+        {
+            var go = GameObject.Find(markerName);
+            if (go == null) { Debug.LogError($"[Build] No {markerName} in the scene yet."); return; }
+            Undo.RecordObject(go.transform, "Snap " + markerName);
+            SnapToGround(go.transform);
+            Selection.activeGameObject = go;
+            EditorSceneManager.MarkAllScenesDirty();
+        }
+
+        /// <summary>Drops a point onto the floor directly below it (never an upper storey).</summary>
+        private static void SnapToGround(Transform t)
+        {
+            Vector3 p = t.position;
+            if (Physics.Raycast(p + Vector3.up * 1.5f, Vector3.down, out RaycastHit hit, 10f))
+            {
+                p.y = hit.point.y;
+                t.position = p;
+                Debug.Log($"[Build] {t.name} snapped to floor at y={p.y:F2}.");
+                return;
+            }
+            float bestTop = float.NegativeInfinity;
+            foreach (var mr in Object.FindObjectsByType<MeshRenderer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                Bounds b = mr.bounds;
+                if (p.x < b.min.x || p.x > b.max.x || p.z < b.min.z || p.z > b.max.z) continue;
+                if (b.max.y > p.y + 0.5f) continue;   // above the placement
+                if (b.max.y < p.y - 4f) continue;     // far below (other storey)
+                if (b.max.y > bestTop) bestTop = b.max.y;
+            }
+            if (!float.IsNegativeInfinity(bestTop)) { p.y = bestTop; t.position = p; Debug.Log($"[Build] {t.name} snapped to mesh surface at y={p.y:F2}."); }
+            else Debug.LogWarning($"[Build] {t.name}: no floor found just below it. Frame the floor (press F on it) and snap again.");
+        }
+
+        // --- Build -------------------------------------------------------------
+
+        [MenuItem("Tools/BO Route/Build Wayfinding Test Objects")]
+        public static void BuildObjects()
+        {
+            var start = GameObject.Find("PathStart");
+            var goal = GameObject.Find("PathGoal");
+            if (start == null || goal == null)
+            {
+                Debug.LogError("[Build] Set PathStart and PathGoal first (Set Path Start Here / Set Path Goal Here).");
+                return;
+            }
+
+            // Remove any rival walker from an old build and re-enable cameras it disabled.
+            var oldPlayer = GameObject.Find("Player");
+            if (oldPlayer != null && oldPlayer.GetComponent<DesktopWalkController>() != null)
+                Undo.DestroyObjectImmediate(oldPlayer);
+            int reEnabled = 0;
+            foreach (var cam in Object.FindObjectsByType<Camera>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                if (!cam.gameObject.activeSelf) { Undo.RecordObject(cam.gameObject, "Enable camera"); cam.gameObject.SetActive(true); reEnabled++; }
+
+            // Fresh GuidancePath (destroy old so no leftover/missing components remain).
+            var oldPath = GameObject.Find("GuidancePath");
+            if (oldPath != null) Undo.DestroyObjectImmediate(oldPath);
+            var pathGo = new GameObject("GuidancePath");
+            Undo.RegisterCreatedObjectUndo(pathGo, "Create GuidancePath");
+            var ctrl = pathGo.AddComponent<WayfindingPathController>();
+            RebuildWaypointArray(ctrl);
+
+            // TrialRunner (the BO bridge).
+            var runnerGo = FindOrCreate("TrialRunner");
+            var runner = GetOrAdd<WayfindingTrialRunner>(runnerGo);
+            Undo.RecordObject(runner, "Wire runner");
+            runner.path = ctrl;
+            runner.startPoint = start.transform;
+            runner.goalPoint = goal.transform;
+
+            string playerNote = "no FirstPersonAIO found - runner will look again at play time";
+            foreach (var mb in Object.FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                if (mb.GetType().Name == "FirstPersonAIO")
+                {
+                    runner.playerRoot = mb.transform;
+                    runner.playerController = mb;
+                    playerNote = "using the scene's FirstPersonAIO player: " + mb.name;
+                    break;
+                }
+            }
+
+            EditorSceneManager.MarkAllScenesDirty();
+            Debug.Log($"[Build] Done. Fresh GuidancePath + TrialRunner wired. Re-enabled {reEnabled} camera(s). {playerNote}. " +
+                      $"Route has {ctrl.waypoints.Length} point(s). Use 'Add Path Waypoint Here' to shape it. Press Play.");
+        }
+
+        // --- Helpers -----------------------------------------------------------
+
+        private static WayfindingPathController FindController()
+        {
+            var pathGo = GameObject.Find("GuidancePath");
+            return pathGo != null ? pathGo.GetComponent<WayfindingPathController>() : null;
         }
 
         private static Material MakeUnlit(Color color)
@@ -94,222 +267,6 @@ namespace RouteNavigation.EditorTools
         {
             var mr = go.GetComponent<MeshRenderer>();
             if (mr != null) mr.sharedMaterial = mat;
-        }
-
-        [MenuItem("Tools/BO Route/Add Path Waypoint Here (Scene view)")]
-        public static void AddWaypointHere()
-        {
-            var pathGo = GameObject.Find("GuidancePath");
-            var ctrl = pathGo != null ? pathGo.GetComponent<WayfindingPathController>() : null;
-            if (ctrl == null || ctrl.waypoints == null || ctrl.waypoints.Length < 2)
-            {
-                Debug.LogError("[Build] Run 'Build Wayfinding Test Objects' first so GuidancePath has Start and Goal.");
-                return;
-            }
-            var sv = SceneView.lastActiveSceneView;
-            if (sv == null)
-            {
-                Debug.LogError("[Build] Open a Scene view, frame the spot on the floor (hover it and press F), then run this.");
-                return;
-            }
-
-            var holder = GameObject.Find("PathWaypoints");
-            if (holder == null)
-            {
-                holder = new GameObject("PathWaypoints");
-                Undo.RegisterCreatedObjectUndo(holder, "Create PathWaypoints");
-            }
-
-            int n = holder.transform.childCount + 1;
-            var wp = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            wp.name = "PathWaypoint " + n;
-            Undo.RegisterCreatedObjectUndo(wp, "Add Waypoint");
-            var col = wp.GetComponent<Collider>();
-            if (col != null) Object.DestroyImmediate(col);
-            wp.transform.SetParent(holder.transform, true);
-            wp.transform.localScale = Vector3.one * 0.3f;
-            SetMaterial(wp, MakeUnlit(Color.cyan));
-            wp.transform.position = sv.pivot;
-            SnapToGround(wp.transform);
-
-            // Insert just before the Goal (the last element), so order stays Start -> waypoints -> Goal.
-            var list = new List<Transform>(ctrl.waypoints);
-            list.Insert(list.Count - 1, wp.transform);
-            Undo.RecordObject(ctrl, "Add waypoint to path");
-            ctrl.waypoints = list.ToArray();
-            ctrl.routing = WayfindingPathController.RoutingMode.Waypoints;
-
-            Selection.activeGameObject = wp;
-            EditorSceneManager.MarkAllScenesDirty();
-            Debug.Log($"[Build] Added {wp.name}. Path now has {ctrl.waypoints.Length} points " +
-                      $"(Start + {ctrl.waypoints.Length - 2} waypoint(s) + Goal). Move it with W to fine-tune; add more along the corridor.");
-        }
-
-        [MenuItem("Tools/BO Route/Snap ALL Path Points to Ground")]
-        public static void SnapAllToGround()
-        {
-            int count = 0;
-            foreach (var nm in new[] { "PathStart", "PathGoal" })
-            {
-                var g = GameObject.Find(nm);
-                if (g != null) { Undo.RecordObject(g.transform, "Snap " + nm); SnapToGround(g.transform); count++; }
-            }
-            var holder = GameObject.Find("PathWaypoints");
-            if (holder != null)
-            {
-                foreach (Transform c in holder.transform) { Undo.RecordObject(c, "Snap waypoint"); SnapToGround(c); count++; }
-            }
-            EditorSceneManager.MarkAllScenesDirty();
-            Debug.Log($"[Build] Snapped {count} path point(s) to their nearest floor. Re-check the yellow route line in the Scene view.");
-        }
-
-        [MenuItem("Tools/BO Route/Clear Path Waypoints")]
-        public static void ClearWaypoints()
-        {
-            var pathGo = GameObject.Find("GuidancePath");
-            var ctrl = pathGo != null ? pathGo.GetComponent<WayfindingPathController>() : null;
-            if (ctrl == null || ctrl.waypoints == null || ctrl.waypoints.Length < 2)
-            {
-                Debug.LogError("[Build] No GuidancePath with Start/Goal found.");
-                return;
-            }
-            Transform start = ctrl.waypoints[0];
-            Transform goal = ctrl.waypoints[ctrl.waypoints.Length - 1];
-            Undo.RecordObject(ctrl, "Clear waypoints");
-            ctrl.waypoints = new Transform[] { start, goal };
-
-            var holder = GameObject.Find("PathWaypoints");
-            if (holder != null) Undo.DestroyObjectImmediate(holder);
-            EditorSceneManager.MarkAllScenesDirty();
-            Debug.Log("[Build] Cleared intermediate waypoints. Path is now Start -> Goal only.");
-        }
-
-        [MenuItem("Tools/BO Route/Snap PathStart to Ground")]
-        public static void SnapStart() => SnapNamed("PathStart");
-
-        [MenuItem("Tools/BO Route/Snap PathGoal to Ground")]
-        public static void SnapGoal() => SnapNamed("PathGoal");
-
-        private static void SnapNamed(string markerName)
-        {
-            var go = GameObject.Find(markerName);
-            if (go == null) { Debug.LogError($"[Build] No {markerName} in the scene yet. Set it first."); return; }
-            Undo.RecordObject(go.transform, "Snap " + markerName);
-            SnapToGround(go.transform);
-            Selection.activeGameObject = go;
-            EditorSceneManager.MarkAllScenesDirty();
-        }
-
-        /// <summary>Drops the marker onto the floor. Physics raycast first, then a collider-free mesh-bounds fallback.</summary>
-        private static void SnapToGround(Transform t)
-        {
-            Vector3 p = t.position;
-
-            // Raycast down from JUST above the placed point (not from far above) so we hit the floor
-            // the user actually framed, NOT an upper storey in a multi-floor building.
-            if (Physics.Raycast(p + Vector3.up * 1.5f, Vector3.down, out RaycastHit hit, 10f))
-            {
-                p.y = hit.point.y;
-                t.position = p;
-                Debug.Log($"[Build] {t.name} snapped to floor at y={p.y:F2}.");
-                return;
-            }
-
-            // Collider-free fallback: the highest mesh surface within ~4 m BELOW the placed point
-            // (so it can't jump to another storey's floor far above or below).
-            float bestTop = float.NegativeInfinity;
-            foreach (var mr in Object.FindObjectsByType<MeshRenderer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
-            {
-                Bounds b = mr.bounds;
-                if (p.x < b.min.x || p.x > b.max.x || p.z < b.min.z || p.z > b.max.z) continue;
-                if (b.max.y > p.y + 0.5f) continue;   // ignore anything above the placement
-                if (b.max.y < p.y - 4f) continue;     // ignore floors far below (other storeys)
-                if (b.max.y > bestTop) bestTop = b.max.y;
-            }
-
-            if (!float.IsNegativeInfinity(bestTop))
-            {
-                p.y = bestTop;
-                t.position = p;
-                Debug.Log($"[Build] {t.name} snapped to mesh surface at y={p.y:F2}.");
-            }
-            else
-            {
-                Debug.LogWarning($"[Build] {t.name}: no floor found just below it. Frame the floor directly (press F on it) and snap again.");
-            }
-        }
-
-        [MenuItem("Tools/BO Route/Build Wayfinding Test Objects")]
-        public static void BuildObjects()
-        {
-            var start = GameObject.Find("PathStart");
-            var goal = GameObject.Find("PathGoal");
-            if (start == null || goal == null)
-            {
-                Debug.LogError("[Build] Set PathStart and PathGoal first " +
-                               "(Tools > BO Route > Set Path Start Here / Set Path Goal Here).");
-                return;
-            }
-
-            // Remove any rival player from an earlier build and re-enable cameras it may have disabled.
-            var oldPlayer = GameObject.Find("Player");
-            if (oldPlayer != null && oldPlayer.GetComponent<DesktopWalkController>() != null)
-                Undo.DestroyObjectImmediate(oldPlayer);
-
-            int reEnabled = 0;
-            foreach (var cam in Object.FindObjectsByType<Camera>(FindObjectsInactive.Include, FindObjectsSortMode.None))
-            {
-                if (!cam.gameObject.activeSelf)
-                {
-                    Undo.RecordObject(cam.gameObject, "Enable camera");
-                    cam.gameObject.SetActive(true);
-                    reEnabled++;
-                }
-            }
-
-            // GuidancePath: draws the route; carries both routing backends.
-            var pathGo = FindOrCreate("GuidancePath");
-            var ctrl = GetOrAdd<WayfindingPathController>(pathGo);
-            var baker = GetOrAdd<NavMeshSubsetBaker>(pathGo);
-            var dijkstra = GetOrAdd<DijkstraGridPathfinder>(pathGo);
-            Undo.RecordObject(ctrl, "Wire path");
-            // Preserve any waypoints already placed between Start and Goal; otherwise just Start -> Goal.
-            if (ctrl.waypoints == null || ctrl.waypoints.Length < 2 ||
-                ctrl.waypoints[0] != start.transform || ctrl.waypoints[ctrl.waypoints.Length - 1] != goal.transform)
-            {
-                ctrl.waypoints = new Transform[] { start.transform, goal.transform };
-            }
-            ctrl.routing = WayfindingPathController.RoutingMode.Waypoints;
-            ctrl.navMeshBaker = baker;
-            ctrl.pathfinder = dijkstra;
-            Undo.RecordObject(baker, "Wire baker");
-            baker.startPoint = start.transform;
-            baker.goalPoint = goal.transform;
-
-            // TrialRunner: the BO bridge. It auto-finds the scene's first-person player.
-            var runnerGo = FindOrCreate("TrialRunner");
-            var runner = GetOrAdd<WayfindingTrialRunner>(runnerGo);
-            Undo.RecordObject(runner, "Wire runner");
-            runner.path = ctrl;
-            runner.startPoint = start.transform;
-            runner.goalPoint = goal.transform;
-
-            string playerNote = "no FirstPersonAIO found - runner will look again at play time";
-            foreach (var mb in Object.FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
-            {
-                if (mb.GetType().Name == "FirstPersonAIO")
-                {
-                    runner.playerRoot = mb.transform;
-                    runner.playerController = mb;
-                    playerNote = "using the scene's FirstPersonAIO player: " + mb.name;
-                    break;
-                }
-            }
-
-            EditorSceneManager.MarkAllScenesDirty();
-            Debug.Log($"[Build] Done. Wired GuidancePath (+NavMesh subset baker +Dijkstra) and TrialRunner. " +
-                      $"Re-enabled {reEnabled} camera(s). {playerNote}. Routing = Waypoints " +
-                      "(use 'Add Path Waypoint Here' to drop points along the corridor). Press Play.");
         }
 
         private static GameObject FindOrCreate(string goName)

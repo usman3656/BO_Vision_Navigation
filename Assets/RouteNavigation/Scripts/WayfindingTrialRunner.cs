@@ -324,7 +324,7 @@ namespace RouteNavigation
                 var warn = new GUIStyle(GUI.skin.label) { fontSize = 20, fontStyle = FontStyle.Bold, wordWrap = true };
                 GUI.color = Color.yellow;
                 GUI.Label(new Rect(16f, 90f, 900f, 60f),
-                    "No valid walkable path - arrows hidden. Move Start/Goal onto connected floor, or raise the NavMeshSubsetBaker margin.", warn);
+                    "No route - arrows hidden. Assign at least a Start and Goal to GuidancePath (Build Wayfinding Test Objects).", warn);
                 GUI.color = Color.white;
             }
 

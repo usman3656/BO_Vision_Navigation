@@ -27,6 +27,11 @@ import socket
 import sys
 import time
 
+import warnings as _warnings
+# Cosmetic: silence scipy's "Sobol balance requires n to be a power of 2" note (n=2(d+1)=14 here).
+# It does not affect the sampling correctness; it was only surfacing as a red 'Python Error' line in Unity.
+_warnings.filterwarnings("ignore", message=r".*balance properties of Sobol.*")
+
 import numpy as np
 import pandas as pd
 

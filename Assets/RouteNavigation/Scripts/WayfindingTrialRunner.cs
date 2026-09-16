@@ -65,11 +65,14 @@ namespace RouteNavigation
             if (goalPoint == null) { var g = GameObject.Find("PathGoal"); if (g != null) goalPoint = g.transform; }
 
             if (playerRoot == null) AutoFindFirstPersonPlayer();
-            if (playerRoot != null)
+            if (playerRoot == null && walker == null)
             {
-                EnsurePlayerCamera();                                   // undo any camera left disabled by an old build
-                if (playerController != null) playerController.enabled = true;
+                // No first-person controller in the scene (e.g. FCG) -> spawn a simple colliderless walker.
+                var pgo = new GameObject("WayfindingPlayer");
+                walker = pgo.AddComponent<DesktopWalkController>();
             }
+            EnsurePlayerCamera();                                       // make the active player's camera the only one rendering
+            if (playerController != null) playerController.enabled = true;
             StartCoroutine(RunLoop());
         }
 
@@ -152,6 +155,7 @@ namespace RouteNavigation
                 else
                 {
                     walker.ResetTo(startPoint);
+                    EnsurePlayerCamera(); // walker's own camera is the only one rendering
                     walker.Begin(goalPoint);
                     while (!walker.Finished) yield return null;
                     walkSeconds = walker.ElapsedSeconds;
@@ -235,8 +239,9 @@ namespace RouteNavigation
         /// (e.g. a leftover rival player's camera or a scene camera an old build disabled).</summary>
         private void EnsurePlayerCamera()
         {
-            if (playerRoot == null) return;
-            Camera mine = playerRoot.GetComponentInChildren<Camera>(true);
+            Transform root = playerRoot != null ? playerRoot : (walker != null ? walker.transform : null);
+            if (root == null) return;
+            Camera mine = root.GetComponentInChildren<Camera>(true);
             if (mine == null) { Debug.LogWarning("[Trial] Could not find the player's own camera to render through."); return; }
             mine.gameObject.SetActive(true);
             mine.enabled = true;

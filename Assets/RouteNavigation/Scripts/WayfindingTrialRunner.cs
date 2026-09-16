@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using BOforUnity;
 using UnityEngine;
 using UnityEngine.AI;
@@ -56,15 +57,7 @@ namespace RouteNavigation
         private void Awake()
         {
             _bo = FindAnyObjectByType<BoForUnityManager>();
-            if (_bo != null)
-            {
-                // Set participant + condition BEFORE the manager reserves its log folder in its Start().
-                // (All Awakes run before any Start, so this always lands in time.)
-                if (!string.IsNullOrWhiteSpace(participantId)) _bo.userId = participantId.Trim();
-                if (!string.IsNullOrWhiteSpace(conditionId)) _bo.conditionId = conditionId.Trim();
-                _bo.reloadSceneOnIterationAdvance = false; // one persistent scene; we loop here
-                SetObjectiveBounds(aestheticsKey, 1f, 10f); // rating scale is 1..10
-            }
+            if (_bo != null) ConfigureManager(_bo); // full config at runtime, before the manager's Start() -> no menus needed
 
             // Self-wire any missing references so the runner works even if Build didn't connect them.
             if (path == null) path = FindAnyObjectByType<WayfindingPathController>();
@@ -313,6 +306,47 @@ namespace RouteNavigation
             {
                 Debug.LogWarning("[Trial] Could not write master CSV: " + e.Message);
             }
+        }
+
+        /// <summary>Configures the BO manager entirely at runtime (params, objectives, seed, backend), so the
+        /// study runs on a plain Play with no editor menus. Runs in Awake, before the manager's Start().</summary>
+        private void ConfigureManager(BoForUnityManager bo)
+        {
+            if (!string.IsNullOrWhiteSpace(participantId)) bo.userId = participantId.Trim();
+            if (!string.IsNullOrWhiteSpace(conditionId)) bo.conditionId = conditionId.Trim();
+            bo.reloadSceneOnIterationAdvance = false;
+
+            if (bo.parameters == null || bo.parameters.Count != 6)
+            {
+                bo.parameters = new List<ParameterEntry>
+                {
+                    new ParameterEntry("R",       new ParameterArgs(0f, 1f)),
+                    new ParameterEntry("G",       new ParameterArgs(0f, 1f)),
+                    new ParameterEntry("B",       new ParameterArgs(0f, 1f)),
+                    new ParameterEntry("Opacity", new ParameterArgs(0f, 1f)),
+                    new ParameterEntry("Size",    new ParameterArgs(0f, 1f)),
+                    new ParameterEntry("Height",  new ParameterArgs(0f, 1f)),
+                };
+            }
+            if (bo.objectives == null || bo.objectives.Count != 2)
+            {
+                bo.objectives = new List<ObjectiveEntry>
+                {
+                    new ObjectiveEntry("WalkTime",   new ObjectiveArgs(0f, 60f, true, 1)),
+                    new ObjectiveEntry("Aesthetics", new ObjectiveArgs(1f, 10f, false, 1)),
+                };
+            }
+            else
+            {
+                SetObjectiveBounds(aestheticsKey, 1f, 10f);
+            }
+
+            bo.numSamplingIterations = 14;
+            bo.numOptimizationIterations = 5;
+            bo.seed = 42;
+            bo.iterationAdvanceMode = BoForUnityManager.IterationAdvanceMode.ExternalSignal;
+            bo.optimizerBackend = BoForUnityManager.OptimizerBackend.MetaTAF;
+            bo.metaRequireSources = false;
         }
 
         private void SetObjectiveBounds(string key, float low, float high)

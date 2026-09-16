@@ -210,14 +210,15 @@ namespace RouteNavigation
 
         private static Vector3 Flat(Vector3 v) { v.y = 0f; return v; }
 
-        /// <summary>Teleports the Rigidbody/collider player to a spot just above the floor point.</summary>
+        /// <summary>Forces the first-person player to the start marker (lifted so the capsule clears the floor).
+        /// The controller is disabled during the move so its physics can't fight the teleport.</summary>
         private void TeleportPlayer(Vector3 floorPos)
         {
-            // Snap to a genuinely walkable navmesh point so the capsule never spawns wedged in geometry.
-            Vector3 target = floorPos;
-            if (NavMesh.SamplePosition(floorPos, out NavMeshHit hit, 6f, NavMesh.AllAreas))
-                target = hit.position;
-            target += Vector3.up * 1.1f; // lift so the capsule bottom clears the floor
+            if (playerRoot == null) return;
+            Vector3 target = floorPos + Vector3.up * 1.1f;
+
+            bool wasEnabled = playerController != null && playerController.enabled;
+            if (playerController != null) playerController.enabled = false;
 
             var rb = playerRoot.GetComponent<Rigidbody>();
             if (rb != null)
@@ -227,6 +228,8 @@ namespace RouteNavigation
                 rb.position = target;
             }
             playerRoot.position = target;
+
+            if (playerController != null) playerController.enabled = wasEnabled;
         }
 
         /// <summary>Makes the player's own camera the one that renders: enables it, disables every other camera

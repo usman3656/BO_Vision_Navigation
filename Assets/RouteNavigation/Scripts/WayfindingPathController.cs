@@ -245,6 +245,12 @@ namespace RouteNavigation
             int used = 0;
             if (_navRouteOk && _route != null && _route.Count >= 2)
             {
+                // Reference floor = the floor under the START point. All arrows sit on THIS storey, so they can
+                // never climb to the roof/another level even if a waypoint's Y was placed high.
+                float floorY = _route[0].y;
+                if (Physics.Raycast(_route[0] + Vector3.up * 1.5f, Vector3.down, out RaycastHit startHit, 8f))
+                    floorY = startHit.point.y;
+
                 float travelled = 0f;
                 float nextAt = spacing * 0.5f; // first arrow a little way in from the start
                 for (int i = 1; i < _route.Count; i++)
@@ -262,11 +268,12 @@ namespace RouteNavigation
                     {
                         float t = (nextAt - travelled) / segLen;
                         Vector3 pos = Vector3.Lerp(a, b2, t);
-                        float baseY = pos.y;
+                        float y = floorY;
                         if (snapArrowsToFloor &&
-                            Physics.Raycast(new Vector3(pos.x, pos.y + 1.5f, pos.z), Vector3.down, out RaycastHit fh, 6f))
-                            baseY = fh.point.y; // sit on the actual floor under this point
-                        pos.y = baseY + lift;
+                            Physics.Raycast(new Vector3(pos.x, floorY + 2f, pos.z), Vector3.down, out RaycastHit fh, 5f) &&
+                            Mathf.Abs(fh.point.y - floorY) < 2f)
+                            y = fh.point.y; // follow small floor variation, but ONLY on the start storey (never the roof)
+                        pos.y = y + lift;
                         GameObject arrow = GetArrow(used++);
                         arrow.transform.SetPositionAndRotation(pos, rot);
                         arrow.transform.localScale = Vector3.one * scale;

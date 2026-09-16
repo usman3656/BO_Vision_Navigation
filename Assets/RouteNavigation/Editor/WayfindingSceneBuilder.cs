@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using RouteNavigation;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -95,6 +96,76 @@ namespace RouteNavigation.EditorTools
             if (mr != null) mr.sharedMaterial = mat;
         }
 
+        [MenuItem("Tools/BO Route/Add Path Waypoint Here (Scene view)")]
+        public static void AddWaypointHere()
+        {
+            var pathGo = GameObject.Find("GuidancePath");
+            var ctrl = pathGo != null ? pathGo.GetComponent<WayfindingPathController>() : null;
+            if (ctrl == null || ctrl.waypoints == null || ctrl.waypoints.Length < 2)
+            {
+                Debug.LogError("[Build] Run 'Build Wayfinding Test Objects' first so GuidancePath has Start and Goal.");
+                return;
+            }
+            var sv = SceneView.lastActiveSceneView;
+            if (sv == null)
+            {
+                Debug.LogError("[Build] Open a Scene view, frame the spot on the floor (hover it and press F), then run this.");
+                return;
+            }
+
+            var holder = GameObject.Find("PathWaypoints");
+            if (holder == null)
+            {
+                holder = new GameObject("PathWaypoints");
+                Undo.RegisterCreatedObjectUndo(holder, "Create PathWaypoints");
+            }
+
+            int n = holder.transform.childCount + 1;
+            var wp = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            wp.name = "PathWaypoint " + n;
+            Undo.RegisterCreatedObjectUndo(wp, "Add Waypoint");
+            var col = wp.GetComponent<Collider>();
+            if (col != null) Object.DestroyImmediate(col);
+            wp.transform.SetParent(holder.transform, true);
+            wp.transform.localScale = Vector3.one * 0.3f;
+            SetMaterial(wp, MakeUnlit(Color.cyan));
+            wp.transform.position = sv.pivot;
+            SnapToGround(wp.transform);
+
+            // Insert just before the Goal (the last element), so order stays Start -> waypoints -> Goal.
+            var list = new List<Transform>(ctrl.waypoints);
+            list.Insert(list.Count - 1, wp.transform);
+            Undo.RecordObject(ctrl, "Add waypoint to path");
+            ctrl.waypoints = list.ToArray();
+            ctrl.routing = WayfindingPathController.RoutingMode.Waypoints;
+
+            Selection.activeGameObject = wp;
+            EditorSceneManager.MarkAllScenesDirty();
+            Debug.Log($"[Build] Added {wp.name}. Path now has {ctrl.waypoints.Length} points " +
+                      $"(Start + {ctrl.waypoints.Length - 2} waypoint(s) + Goal). Move it with W to fine-tune; add more along the corridor.");
+        }
+
+        [MenuItem("Tools/BO Route/Clear Path Waypoints")]
+        public static void ClearWaypoints()
+        {
+            var pathGo = GameObject.Find("GuidancePath");
+            var ctrl = pathGo != null ? pathGo.GetComponent<WayfindingPathController>() : null;
+            if (ctrl == null || ctrl.waypoints == null || ctrl.waypoints.Length < 2)
+            {
+                Debug.LogError("[Build] No GuidancePath with Start/Goal found.");
+                return;
+            }
+            Transform start = ctrl.waypoints[0];
+            Transform goal = ctrl.waypoints[ctrl.waypoints.Length - 1];
+            Undo.RecordObject(ctrl, "Clear waypoints");
+            ctrl.waypoints = new Transform[] { start, goal };
+
+            var holder = GameObject.Find("PathWaypoints");
+            if (holder != null) Undo.DestroyObjectImmediate(holder);
+            EditorSceneManager.MarkAllScenesDirty();
+            Debug.Log("[Build] Cleared intermediate waypoints. Path is now Start -> Goal only.");
+        }
+
         [MenuItem("Tools/BO Route/Snap PathStart to Ground")]
         public static void SnapStart() => SnapNamed("PathStart");
 
@@ -179,8 +250,13 @@ namespace RouteNavigation.EditorTools
             var baker = GetOrAdd<NavMeshSubsetBaker>(pathGo);
             var dijkstra = GetOrAdd<DijkstraGridPathfinder>(pathGo);
             Undo.RecordObject(ctrl, "Wire path");
-            ctrl.waypoints = new Transform[] { start.transform, goal.transform };
-            ctrl.routing = WayfindingPathController.RoutingMode.NavMesh;
+            // Preserve any waypoints already placed between Start and Goal; otherwise just Start -> Goal.
+            if (ctrl.waypoints == null || ctrl.waypoints.Length < 2 ||
+                ctrl.waypoints[0] != start.transform || ctrl.waypoints[ctrl.waypoints.Length - 1] != goal.transform)
+            {
+                ctrl.waypoints = new Transform[] { start.transform, goal.transform };
+            }
+            ctrl.routing = WayfindingPathController.RoutingMode.Waypoints;
             ctrl.navMeshBaker = baker;
             ctrl.pathfinder = dijkstra;
             Undo.RecordObject(baker, "Wire baker");
@@ -209,7 +285,8 @@ namespace RouteNavigation.EditorTools
 
             EditorSceneManager.MarkAllScenesDirty();
             Debug.Log($"[Build] Done. Wired GuidancePath (+NavMesh subset baker +Dijkstra) and TrialRunner. " +
-                      $"Re-enabled {reEnabled} camera(s). {playerNote}. Routing = NavMesh. Press Play.");
+                      $"Re-enabled {reEnabled} camera(s). {playerNote}. Routing = Waypoints " +
+                      "(use 'Add Path Waypoint Here' to drop points along the corridor). Press Play.");
         }
 
         private static GameObject FindOrCreate(string goName)

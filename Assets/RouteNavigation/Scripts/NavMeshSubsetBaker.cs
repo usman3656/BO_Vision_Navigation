@@ -38,8 +38,8 @@ namespace RouteNavigation
         public NavMeshCollectGeometry geometry = NavMeshCollectGeometry.PhysicsColliders;
 
         [Header("Debug view (Scene view, during Play)")]
-        [Tooltip("Draws the ACTUAL runtime navmesh in cyan, with a green cross at Start and red cross at Goal, so you can see if they are on the same connected piece.")]
-        public bool drawNavMesh = true;
+        [Tooltip("Draws the ACTUAL runtime navmesh in cyan, with a green cross at Start and red cross at Goal, so you can see if they are on the same connected piece. Only relevant in NavMesh routing mode.")]
+        public bool drawNavMesh = false;
 
         [Header("Result (read-only)")]
         public bool baked;
@@ -48,7 +48,8 @@ namespace RouteNavigation
         private NavMeshDataInstance _instance;
         private NavMeshTriangulation _tri;
 
-        private void Awake() => EnsureBaked();
+        // No eager bake on Awake: only bakes when NavMesh routing actually asks for it (EnsureBaked),
+        // so Waypoints/Dijkstra modes never trigger a wasteful bake.
         private void OnDestroy() { if (_instance.valid) NavMesh.RemoveNavMeshData(_instance); }
 
         /// <summary>Bakes the subset NavMesh once. Safe to call repeatedly. Returns true if a walkable mesh exists.</summary>

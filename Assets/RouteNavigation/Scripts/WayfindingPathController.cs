@@ -15,13 +15,17 @@ namespace RouteNavigation
     /// </summary>
     public class WayfindingPathController : MonoBehaviour
     {
-        public enum RoutingMode { NavMesh, Dijkstra, Straight }
+        public enum RoutingMode { Waypoints, NavMesh, Dijkstra }
 
-        [Header("Route: element 0 = Start, last = Goal")]
+        [Header("Route: element 0 = Start, middle = waypoints, last = Goal")]
         public Transform[] waypoints;
 
         [Header("Routing")]
-        public RoutingMode routing = RoutingMode.NavMesh;
+        [Tooltip("Waypoints = follow the hand-placed markers in order (recommended, reliable). NavMesh/Dijkstra = auto.")]
+        public RoutingMode routing = RoutingMode.Waypoints;
+        [Tooltip("Waypoints mode: smooth the path into a curve through the waypoints instead of straight segments.")]
+        public bool smoothPath = true;
+        [Range(2, 20)] public int smoothingPerSegment = 8;
         [Tooltip("NavMesh mode: bakes the subset NavMesh around Start-Goal before routing.")]
         public NavMeshSubsetBaker navMeshBaker;
         [Tooltip("NavMesh mode: how far to snap Start/Goal onto the nearest walkable navmesh point.")]
@@ -142,10 +146,39 @@ namespace RouteNavigation
                     }
                     return raw;
                 }
-                default:
-                    _navRouteOk = true; // a straight line is intentional in Straight mode
-                    return raw;
+                default: // Waypoints: follow Start -> waypoints -> Goal, optionally smoothed into a curve.
+                    _navRouteOk = raw.Count >= 2;
+                    return (smoothPath && raw.Count >= 3) ? Smooth(raw, smoothingPerSegment) : raw;
             }
+        }
+
+        /// <summary>Catmull-Rom smoothing so the arrow trail curves nicely through the waypoints.</summary>
+        private static List<Vector3> Smooth(List<Vector3> pts, int seg)
+        {
+            seg = Mathf.Max(2, seg);
+            var outPts = new List<Vector3>((pts.Count - 1) * seg + 1);
+            for (int i = 0; i < pts.Count - 1; i++)
+            {
+                Vector3 p0 = pts[Mathf.Max(0, i - 1)];
+                Vector3 p1 = pts[i];
+                Vector3 p2 = pts[i + 1];
+                Vector3 p3 = pts[Mathf.Min(pts.Count - 1, i + 2)];
+                for (int s = 0; s < seg; s++)
+                {
+                    float t = s / (float)seg;
+                    outPts.Add(CatmullRom(p0, p1, p2, p3, t));
+                }
+            }
+            outPts.Add(pts[pts.Count - 1]);
+            return outPts;
+        }
+
+        private static Vector3 CatmullRom(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, float t)
+        {
+            float t2 = t * t, t3 = t2 * t;
+            return 0.5f * ((2f * p1) + (-p0 + p2) * t
+                + (2f * p0 - 5f * p1 + 4f * p2 - p3) * t2
+                + (-p0 + 3f * p1 - 3f * p2 + p3) * t3);
         }
 
         private List<Vector3> NavMeshRoute(Vector3 start, Vector3 goal)

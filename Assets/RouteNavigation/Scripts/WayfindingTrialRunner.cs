@@ -179,6 +179,7 @@ namespace RouteNavigation
                 // (4) Submit both objectives and wait for the optimizer's next parameters.
                 AddObjectiveByKey(walkTimeKey, walkSeconds);
                 AddObjectiveByKey(aestheticsKey, aesthetics);
+                AppendMasterRow(_trial, r, g, b, opacity, size, height, walkSeconds, aesthetics);
                 _status = "Submitted. The optimizer is thinking...";
                 int iterationBefore = _bo.currentIteration;
                 _bo.OptimizationStart();
@@ -286,6 +287,32 @@ namespace RouteNavigation
             if (_bo?.objectives == null) return;
             foreach (var o in _bo.objectives)
                 if (o?.value?.values != null) o.value.values.Clear();
+        }
+
+        /// <summary>Appends ONE row per trial (all participants) to a single master CSV:
+        /// Assets/StreamingAssets/BOData/LogData/AllTrials_master.csv</summary>
+        private void AppendMasterRow(int trial, float r, float g, float b, float op, float sz, float ht, float walkSeconds, int aesthetics)
+        {
+            try
+            {
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                string dir = System.IO.Path.Combine(Application.streamingAssetsPath, "BOData", "LogData");
+                System.IO.Directory.CreateDirectory(dir);
+                string file = System.IO.Path.Combine(dir, "AllTrials_master.csv");
+                if (!System.IO.File.Exists(file))
+                    System.IO.File.AppendAllText(file,
+                        "Timestamp;Participant;Condition;Trial;WalkTimeSeconds;Aesthetics;R;G;B;Opacity;Size;Height\n");
+                string row = string.Format(inv,
+                    "{0};{1};{2};{3};{4:F3};{5};{6:F3};{7:F3};{8:F3};{9:F3};{10:F3};{11:F3}\n",
+                    System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                    participantId, conditionId, trial, walkSeconds, aesthetics, r, g, b, op, sz, ht);
+                System.IO.File.AppendAllText(file, row);
+                Debug.Log($"[Trial] Appended trial {trial} for {participantId} to master CSV.");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning("[Trial] Could not write master CSV: " + e.Message);
+            }
         }
 
         private void SetObjectiveBounds(string key, float low, float high)

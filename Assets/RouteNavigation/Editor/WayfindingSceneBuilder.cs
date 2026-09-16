@@ -51,23 +51,14 @@ namespace RouteNavigation.EditorTools
 
         private static void BuildBeacon(GameObject root, Color color)
         {
-            Material mat = MakeUnlit(color);
-
+            // Just a small glowing sphere marker - no tall pillar.
             var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             sphere.name = "Marker";
             sphere.transform.SetParent(root.transform, false);
             sphere.transform.localPosition = Vector3.up * 0.3f;
-            sphere.transform.localScale = Vector3.one * 0.6f;
+            sphere.transform.localScale = Vector3.one * 0.5f;
             StripCollider(sphere);
-            SetMaterial(sphere, mat);
-
-            var beam = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            beam.name = "Beacon";
-            beam.transform.SetParent(root.transform, false);
-            beam.transform.localPosition = Vector3.up * 2f;
-            beam.transform.localScale = new Vector3(0.12f, 2f, 0.12f); // ~4 m tall, thin
-            StripCollider(beam);
-            SetMaterial(beam, mat);
+            SetMaterial(sphere, MakeUnlit(color));
         }
 
         // --- Waypoints ---------------------------------------------------------
@@ -196,6 +187,13 @@ namespace RouteNavigation.EditorTools
             {
                 Debug.LogError("[Build] Set PathStart and PathGoal first (Set Path Start Here / Set Path Goal Here).");
                 return;
+            }
+
+            // Strip the old tall "Beacon" pillar from Start/Goal if present (markers are just spheres now).
+            foreach (var m in new[] { start, goal })
+            {
+                var beacon = m.transform.Find("Beacon");
+                if (beacon != null) Undo.DestroyObjectImmediate(beacon.gameObject);
             }
 
             // Remove any rival walker from an old build and re-enable cameras it disabled.

@@ -66,6 +66,11 @@ namespace RouteNavigation
                 SetObjectiveBounds(aestheticsKey, 1f, 10f); // rating scale is 1..10
             }
 
+            // Self-wire any missing references so the runner works even if Build didn't connect them.
+            if (path == null) path = FindAnyObjectByType<WayfindingPathController>();
+            if (startPoint == null) { var s = GameObject.Find("PathStart"); if (s != null) startPoint = s.transform; }
+            if (goalPoint == null) { var g = GameObject.Find("PathGoal"); if (g != null) goalPoint = g.transform; }
+
             if (playerRoot == null) AutoFindFirstPersonPlayer();
             if (playerRoot != null)
             {

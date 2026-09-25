@@ -44,17 +44,11 @@ namespace RouteNavigation
                 goalKnown = true,
             },
 
-            // ArchVizPRO Vol.7 (indoor). Start recovered from the saved start pose (Sept 3).
-            // GOAL: fill in the real coordinate below and set goalKnown = true. Until then the
-            // bootstrap uses a PathGoal already in the scene if one exists.
-            ["ArchVizPRO_Interior_Vol.7_URP"] = new SceneRoute
-            {
-                condition = "Vol7",
-                start = new Vector3(-2.5403f, 4.8587f, 0.0220f),
-                goal  = new Vector3(0f, 0f, 0f),   // TODO: real Vol.7 goal
-                waypoints = new Vector3[0],
-                goalKnown = false,
-            },
+            // NOTE: Vol.7 (ArchVizPRO_Interior_Vol.7_URP) and Vol.6 (AVP6_Desktop) are intentionally
+            // NOT listed here. Their route (Start/Goal/waypoints + GuidancePath + TrialRunner) is saved
+            // in the scene itself, and the runner self-heals the BO manager. Adding a bootstrap entry with
+            // a stale hardcoded start caused a ~2 m offset between the saved green marker and the route,
+            // so those scenes rely solely on their saved setup. Only FCG is fully code-hardcoded.
         };
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]

@@ -16,7 +16,7 @@ namespace RouteNavigation
     public class DesktopWalkController : MonoBehaviour
     {
         [Header("Movement")]
-        public float moveSpeed = 15f;   // ~5x, for covering the large outdoor FCG map quickly
+        public float moveSpeed = 4f;    // normal walking speed, matched to Vol.7's FirstPersonAIO walkSpeed (4)
         public float lookSpeed = 2f;
         public float eyeHeight = 1.6f;
         [Tooltip("XZ distance to the goal (metres) that counts as 'arrived'.")]

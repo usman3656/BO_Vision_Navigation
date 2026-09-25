@@ -29,30 +29,13 @@ namespace RouteNavigation
             public bool goalKnown;   // false => Goal coordinate not yet supplied; fall back to a saved PathGoal
         }
 
-        // Active-scene name -> hardcoded route. Add the third (Vol.6 transfer) scene here when needed.
-        private static readonly Dictionary<string, SceneRoute> Routes = new Dictionary<string, SceneRoute>
-        {
-            // Fantastic City Generator (outdoor). Route placed by MR BAWANI in the FCG scene (2026-09-25)
-            // and hardcoded here so the bootstrap enforces it on Play.
-            ["Scene-Demo"] = new SceneRoute
-            {
-                condition = "FCG",
-                start = new Vector3(24.6506f, 0.1510f, -46.7146f),
-                goal  = new Vector3(30.7300f, -0.5500f, 12.1700f),
-                waypoints = new Vector3[]
-                {
-                    new Vector3(36.8200f, 0.1400f, -48.6600f),
-                    new Vector3(36.5800f, 0.1500f, -51.2900f),
-                },
-                goalKnown = true,
-            },
-
-            // NOTE: Vol.7 (ArchVizPRO_Interior_Vol.7_URP) and Vol.6 (AVP6_Desktop) are intentionally
-            // NOT listed here. Their route (Start/Goal/waypoints + GuidancePath + TrialRunner) is saved
-            // in the scene itself, and the runner self-heals the BO manager. Adding a bootstrap entry with
-            // a stale hardcoded start caused a ~2 m offset between the saved green marker and the route,
-            // so those scenes rely solely on their saved setup. Only FCG is fully code-hardcoded.
-        };
+        // Active-scene name -> hardcoded route.
+        // ALL THREE study scenes (Vol.7, FCG, Vol.6) now keep their route (Start/Goal/waypoints +
+        // GuidancePath + TrialRunner) saved IN the scene, and the runner self-heals the BO manager. So the
+        // scene is the single source of truth and NONE are code-enforced here: whatever you place and save
+        // in the scene is exactly what runs. Add an entry ONLY for a scene that has no saved route at all
+        // and must be built purely from code.
+        private static readonly Dictionary<string, SceneRoute> Routes = new Dictionary<string, SceneRoute>();
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using BOforUnity;
 using UnityEngine;
 using UnityEngine.AI;
+using UnityEngine.SceneManagement;
 
 namespace RouteNavigation
 {
@@ -54,8 +55,23 @@ namespace RouteNavigation
         private string _status = "Starting up...";
         private int _trial;
 
+        /// <summary>Forces the condition label from the active scene, so each environment's data is
+        /// always tagged correctly (Vol7 / FCG / Vol6) regardless of any serialized default.</summary>
+        private static string ConditionForScene(string scene, string fallback)
+        {
+            switch (scene)
+            {
+                case "Scene-Demo": return "FCG";
+                case "ArchVizPRO_Interior_Vol.7_URP": return "Vol7";
+                case "AVP6_Desktop": return "Vol6";
+                default: return fallback;
+            }
+        }
+
         private void Awake()
         {
+            conditionId = ConditionForScene(SceneManager.GetActiveScene().name, conditionId);
+
             _bo = FindAnyObjectByType<BoForUnityManager>();
             if (_bo == null)
             {

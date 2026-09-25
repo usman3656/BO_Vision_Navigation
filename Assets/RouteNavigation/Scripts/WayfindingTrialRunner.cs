@@ -101,6 +101,11 @@ namespace RouteNavigation
             if (startPoint == null) { var s = GameObject.Find("PathStart"); if (s != null) startPoint = s.transform; }
             if (goalPoint == null) { var g = GameObject.Find("PathGoal"); if (g != null) goalPoint = g.transform; }
 
+            // The spawn point + arrow origin must match the VISIBLE marker sphere the participant sees.
+            // If a marker's sphere has drifted from its pivot, move the pivot onto the sphere so they align.
+            AlignMarkerToVisual(startPoint);
+            AlignMarkerToVisual(goalPoint);
+
             if (playerRoot == null) AutoFindFirstPersonPlayer();
             if (playerRoot == null && walker == null)
             {
@@ -111,6 +116,22 @@ namespace RouteNavigation
             EnsurePlayerCamera();                                       // make the active player's camera the only one rendering
             if (playerController != null) playerController.enabled = true;
             StartCoroutine(RunLoop());
+        }
+
+        /// <summary>Makes a marker's PIVOT coincide with its VISIBLE sphere child, then re-centers the sphere
+        /// on the pivot. This guarantees the spawn/route point is exactly where the participant sees the marker,
+        /// fixing a marker whose visible sphere had drifted from its pivot. Clean markers are left untouched.</summary>
+        private static void AlignMarkerToVisual(Transform marker)
+        {
+            if (marker == null) return;
+            var mr = marker.GetComponentInChildren<MeshRenderer>(true);
+            if (mr == null || mr.transform == marker) return;      // no separate visible sphere
+            Transform sphere = mr.transform;
+            Vector3 flatOffset = sphere.position - marker.position; flatOffset.y = 0f;
+            if (flatOffset.magnitude < 0.1f) return;               // already aligned; don't disturb clean markers
+            Vector3 visualWorld = sphere.position;
+            marker.position = visualWorld;                          // pivot jumps to where the sphere is seen
+            sphere.position = marker.position + Vector3.up * 0.3f;  // sphere sits neatly back on the pivot
         }
 
         /// <summary>Finds the scene's first-person controller by type name, so we don't hard-depend on the asset.</summary>

@@ -55,13 +55,13 @@ namespace RouteNavigation
         private static void Bootstrap()
         {
             string scene = SceneManager.GetActiveScene().name;
-            if (!Routes.TryGetValue(scene, out SceneRoute route)) return;      // not a study scene
-
-            // If the scene was already set up manually (a runner exists), don't build a second copy.
-            if (Object.FindAnyObjectByType<WayfindingTrialRunner>() != null) return;
+            if (!Routes.TryGetValue(scene, out SceneRoute route)) return;      // Vol.7/Vol.6 rely on their saved scene
 
             EnsureManager();
 
+            // ENFORCE the hardcoded route for this scene even if the scene already has a saved route: existing
+            // markers are MOVED to the hardcoded spots and any saved (long) waypoint chain is replaced. This is
+            // why FCG's shortened goal always wins over the older, longer route saved in the scene.
             Transform start = EnsureMarker("PathStart", route.start, Color.green);
 
             Transform goal;
@@ -71,16 +71,18 @@ namespace RouteNavigation
             }
             else
             {
-                // No hardcoded goal yet: use a PathGoal saved in the scene, if any.
                 var existing = GameObject.Find("PathGoal");
                 if (existing == null)
                 {
-                    Debug.LogError($"[Bootstrap] Scene '{scene}': no Goal coordinate hardcoded and no PathGoal in the " +
-                                   "scene. Set WayfindingBootstrap's goal for this scene (goalKnown = true).");
+                    Debug.LogError($"[Bootstrap] Scene '{scene}': no Goal coordinate hardcoded and no PathGoal in the scene.");
                     return;
                 }
                 goal = existing.transform;
             }
+
+            // Drop any saved intermediate waypoints so only the hardcoded route remains.
+            var oldHolder = GameObject.Find("PathWaypoints");
+            if (oldHolder != null) Object.Destroy(oldHolder);
 
             var routePoints = new List<Transform> { start };
             if (route.waypoints != null && route.waypoints.Length > 0)
@@ -95,23 +97,27 @@ namespace RouteNavigation
             }
             routePoints.Add(goal);
 
-            // GuidancePath (the arrow trail).
-            var pathGo = new GameObject("GuidancePath");
-            var ctrl = pathGo.AddComponent<WayfindingPathController>();
+            // Reuse the scene's GuidancePath if it has one; otherwise create it. Point it at the hardcoded route.
+            var ctrl = Object.FindAnyObjectByType<WayfindingPathController>();
+            if (ctrl == null) ctrl = new GameObject("GuidancePath").AddComponent<WayfindingPathController>();
             ctrl.waypoints = routePoints.ToArray();
 
-            // TrialRunner: create INACTIVE so we can wire references before its Awake runs, then activate.
-            var runnerGo = new GameObject("TrialRunner");
-            runnerGo.SetActive(false);
-            var runner = runnerGo.AddComponent<WayfindingTrialRunner>();
-            runner.path = ctrl;
-            runner.startPoint = start;
-            runner.goalPoint = goal;
-            runner.conditionId = route.condition;
-            runnerGo.SetActive(true);   // Awake now runs with everything wired + configures the optimizer
+            // Only build a runner if the scene doesn't already have one (the saved runner self-wires to
+            // start/goal/path and derives its condition label from the scene name).
+            if (Object.FindAnyObjectByType<WayfindingTrialRunner>() == null)
+            {
+                var runnerGo = new GameObject("TrialRunner");
+                runnerGo.SetActive(false);
+                var runner = runnerGo.AddComponent<WayfindingTrialRunner>();
+                runner.path = ctrl;
+                runner.startPoint = start;
+                runner.goalPoint = goal;
+                runner.conditionId = route.condition;
+                runnerGo.SetActive(true);
+            }
 
-            Debug.Log($"[Bootstrap] Built study for '{scene}' ({route.condition}): manager + markers + path + runner. " +
-                      $"Route has {ctrl.waypoints.Length} point(s). Press START.");
+            Debug.Log($"[Bootstrap] Enforced route for '{scene}' ({route.condition}): {ctrl.waypoints.Length} point(s), " +
+                      $"goal at {goal.position}.");
         }
 
         /// <summary>Ensures a single Bo manager exists; instantiates the Resources prefab if the scene has none.</summary>

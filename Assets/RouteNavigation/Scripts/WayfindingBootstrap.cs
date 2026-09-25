@@ -32,15 +32,18 @@ namespace RouteNavigation
         // Active-scene name -> hardcoded route. Add the third (Vol.6 transfer) scene here when needed.
         private static readonly Dictionary<string, SceneRoute> Routes = new Dictionary<string, SceneRoute>
         {
-            // Fantastic City Generator (outdoor). Shortened for VR safety: the full route (~78 m straight,
-            // ~105 m with waypoints) is too long to walk physically. Goal moved to ~20 m along the same
-            // bearing as the original goal (-399.05, 99.72). Verify on Play that it lands on open street.
+            // Fantastic City Generator (outdoor). Route placed by MR BAWANI in the FCG scene (2026-09-25)
+            // and hardcoded here so the bootstrap enforces it on Play.
             ["Scene-Demo"] = new SceneRoute
             {
                 condition = "FCG",
-                start = new Vector3(-345.41f, -0.23f, 42.84f),
-                goal  = new Vector3(-358.82f, -0.23f, 57.06f),
-                waypoints = new Vector3[0],
+                start = new Vector3(24.6506f, 0.1510f, -46.7146f),
+                goal  = new Vector3(30.7300f, -0.5500f, 12.1700f),
+                waypoints = new Vector3[]
+                {
+                    new Vector3(36.8200f, 0.1400f, -48.6600f),
+                    new Vector3(36.5800f, 0.1500f, -51.2900f),
+                },
                 goalKnown = true,
             },
 

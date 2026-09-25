@@ -1,23 +1,28 @@
 # ViT-B-32 embeddings of the three start images
 
-Model: open_clip ViT-B-32 (laion2b_s34b_b79k). Each image -> a 512-number vector (see embeddings.csv).
-Recomputed after re-capturing the FCG (Scene-Demo) start image.
+Model: open_clip ViT-B-32 (laion2b_s34b_b79k). Each start image -> a 512-number vector (embeddings.csv).
+Recomputed 2026-09-25 after re-capturing the FCG (Scene-Demo) and Vol.6 (AVP6_Desktop) start images.
+NOTE: the Vol.7 start image is still the older (Sept 3) bedroom capture; re-capturing it may shift the
+numbers slightly.
 
 ## Pairwise similarity (1.0 = identical, lower = more different)
 
-- Vol6_living vs Vol7_bedroom: 0.743   (both interiors — similar)
-- Vol7_bedroom vs FCG_street:  0.458
-- Vol6_living  vs FCG_street:  0.431
+- Vol6_living vs Vol7_bedroom: 0.735   (both interiors — similar)
+- Vol7_bedroom vs FCG_street:  0.474
+- Vol6_living  vs FCG_street:  0.445
 
-## Decision
+## Reading
 
-The two interiors (Vol6, Vol7) are close to each other and BOTH are ~equally far from FCG
-(0.431 vs 0.458 — a negligible 0.03 gap). So the natural split is: optimize on one interior + FCG,
-transfer-test on the other interior.
+FCG (outdoor city) is the clear outlier: both interiors are ~0.45 from it, while the two interiors are
+close to each other (0.735). So the natural design is: optimize on one interior + FCG (spanning the
+space), and transfer-test on the held-out interior.
 
-- OPTIMIZE on: **Vol7_bedroom + FCG_street**  (interior + outdoor; spans the space)
-- TRANSFER-TEST on: **Vol6_living**  (the held-out interior, close to Vol7 -> a meaningful transfer target)
+## Two valid splits (the gap between them is within noise, ~0.03)
 
-Note: a strict "most-dissimilar pair" rule would instead pick Vol6+FCG (0.431) to optimize and
-transfer-test Vol7 — but that is within noise, and the recommended split keeps the Vol7 run already
-collected. Confirm the final split with the supervisor if needed.
+1. **Strict "most-dissimilar pair"** -> optimize on **Vol6 + FCG** (0.445), transfer-test on **Vol7**.
+2. **Practical (reuse existing data)** -> optimize on **Vol7 + FCG**, transfer-test on **Vol6**.
+   Preferred if the completed Vol.7 run (P01_17) is to be used as an optimize environment.
+
+Both put one interior + the outdoor city in the optimize set and hold out the other interior, which is
+the meaningful transfer target. Recommendation: confirm the final split with Prof. Colley; option 2 keeps
+the Vol.7 data already collected.

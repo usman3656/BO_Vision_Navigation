@@ -401,7 +401,22 @@ namespace RouteNavigation
             bo.seed = 42;
             bo.iterationAdvanceMode = BoForUnityManager.IterationAdvanceMode.ExternalSignal;
             bo.optimizerBackend = BoForUnityManager.OptimizerBackend.MetaTAF;
-            bo.metaRequireSources = false;
+
+            // Automatic transfer pipeline, keyed off the scene's condition:
+            //   Vol7, FCG  -> SOURCE environments: cold-start (don't consume) AND export themselves as
+            //                 population models. Running both auto-populates MetaSources/.
+            //   Vol6       -> TRANSFER TARGET: consume the Vol7+FCG models, require them, don't export.
+            //   anything else (e.g. a "Vol6_baseline" cold-start control) -> no consume, no export.
+            string cond = (conditionId ?? "").Trim();
+            bool isSource = cond.Equals("Vol7", System.StringComparison.OrdinalIgnoreCase)
+                         || cond.Equals("FCG", System.StringComparison.OrdinalIgnoreCase);
+            bool isTransferTarget = cond.Equals("Vol6", System.StringComparison.OrdinalIgnoreCase);
+
+            bo.metaConsumeSources = isTransferTarget;   // only Vol6 transfers from the sources
+            bo.metaRequireSources = isTransferTarget;   // Vol6 must have the sources; sources/baseline must not
+            bo.metaExportSource   = isSource;           // Vol7/FCG write themselves as population models
+            bo.metaExportName     = isSource && !string.IsNullOrWhiteSpace(bo.userId)
+                                    ? (bo.userId.Trim() + "_" + cond) : "";
         }
 
         private void SetObjectiveBounds(string key, float low, float high)

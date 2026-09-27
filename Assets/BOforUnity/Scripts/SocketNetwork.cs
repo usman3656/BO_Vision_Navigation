@@ -42,6 +42,9 @@ namespace BOforUnity.Scripts
         public bool metaRequireSources;
         public float metaRho, metaTargetWeight, metaDecayRate;
         public int metaWarmupIters, metaDecayStartIter;
+        // Automatic source-transfer pipeline (see BoForUnityManager).
+        public bool metaConsumeSources, metaExportSource;
+        public string metaExportName;
         // DBO backend settings (ignored by the other backends).
         public string dboSpatialKernel, dboAlphaParameterization;
         public float dboInitialAlpha, dboAcquisitionTimeOffset, dboValidationConfidence;
@@ -718,6 +721,9 @@ namespace BOforUnity.Scripts
                     metaWarmupIters = _bomanager.metaWarmupIters,
                     metaDecayStartIter = _bomanager.metaDecayStartIter,
                     metaDecayRate = _bomanager.metaDecayRate,
+                    metaConsumeSources = _bomanager.metaConsumeSources,
+                    metaExportSource = _bomanager.metaExportSource,
+                    metaExportName = _bomanager.metaExportName,
                     dboSpatialKernel = NormalizeDboSpatialKernel(_bomanager.dboSpatialKernel),
                     dboAlphaParameterization = NormalizeDboAlphaParameterization(_bomanager.dboAlphaParameterization),
                     dboInitialAlpha = _bomanager.dboInitialAlpha,

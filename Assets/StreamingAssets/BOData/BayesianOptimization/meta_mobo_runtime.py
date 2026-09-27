@@ -66,6 +66,14 @@ META_WARMUP_ITERS = 1
 META_DECAY_START_ITER = 2
 META_DECAY_RATE = 0.3
 
+# Automatic source-transfer pipeline (driven per-scene from Unity's WayfindingTrialRunner).
+# A source environment (Vol7, FCG) runs with META_CONSUME_SOURCES False (cold start) and
+# META_EXPORT_SOURCE True (writes itself as a population model when it finishes). The transfer
+# target (Vol6) runs with META_CONSUME_SOURCES True and META_EXPORT_SOURCE False.
+META_CONSUME_SOURCES = True   # load/use population models for the acquisition
+META_EXPORT_SOURCE = False    # export this completed run as a population model
+META_EXPORT_NAME = ""         # artifact name (default: <USER_LOG_ID>_<CONDITION_LOG_ID>)
+
 # paths/state
 PROJECT_PATH = ""
 
@@ -552,6 +560,40 @@ def draw_initial_unit_samples(n_samples, d, seed):
         rng = np.random.default_rng(seed)
         return rng.random((n_samples, d)).astype(np.float64)
 
+# -------------------- automatic source export --------------------
+def export_run_as_source(x_unit, y_norm):
+    """After a SOURCE run (e.g. Vol7/FCG) finishes, fit per-objective GPs and write this run as a
+    Meta-TAF population model into the shared source directory, so the transfer target (Vol6) can
+    consume it with no offline meta_train.py step. Reuses meta_train's exact fitting/writing code so
+    the artifact is byte-identical to an offline-built one (same frame stamp, same self-check).
+
+    x_unit is the run's X in the unit cube; y_norm is Y in [-1, 1] maximization space -- exactly the
+    spaces meta_train.write_artifact expects. Failure here is logged but never raised: the study run
+    already finished successfully, so a degenerate-data export refusal must not surface as a crash.
+    """
+    out_dir = resolve_meta_source_dir()
+    try:
+        import meta_train
+    except Exception as e:
+        print(f"Meta-TAF export: could not import meta_train ({e}); skipping export.", flush=True)
+        return
+    name = META_EXPORT_NAME or meta_train.sanitize_name(f"{USER_LOG_ID}_{CONDITION_LOG_ID}")
+    try:
+        stack = meta_train._import_stack()
+        gp_entries = meta_train.fit_per_objective_hyperparameters(x_unit, y_norm, stack)
+        # WalkTime is measured and Aesthetics is a real human rating -> human / measured provenance.
+        residual = meta_train.write_artifact(
+            out_dir, name, x_unit, y_norm, gp_entries, FRAME, PROJECT_PATH,
+            source_type="human", y_calibration="measured", stack=stack,
+        )
+        print(f"Meta-TAF export: wrote population model '{name}' to {out_dir} "
+              f"(fit residual {residual:.4f}).", flush=True)
+    except Exception as e:
+        print(f"Meta-TAF export: FAILED to export '{name}' ({e}). The study run itself is unaffected; "
+              "this environment just did not produce a transfer source (often degenerate data, e.g. "
+              "every rating identical).", flush=True)
+
+
 # -------------------- main loop --------------------
 def meta_execute(conn, seed, iterations, initial_samples):
     global PROJECT_PATH
@@ -568,10 +610,19 @@ def meta_execute(conn, seed, iterations, initial_samples):
     # Stage frame-validated sources into the run folder (also the audit trail).
     source_dir = resolve_meta_source_dir()
     staging_dir = os.path.join(PROJECT_PATH, "MetaSourcesUsed")
-    kept, rejected = validate_and_stage_sources(source_dir, staging_dir)
+    if not META_CONSUME_SOURCES:
+        # Cold-start run (a source environment such as Vol7/FCG, or a no-transfer baseline).
+        # It must NOT transfer from any population models even if some exist in the folder, so
+        # skip loading entirely: the optimizer sees an empty staging dir and runs plain qLogNEHVI.
+        os.makedirs(os.path.join(staging_dir, "gp_states"), exist_ok=True)
+        os.makedirs(os.path.join(staging_dir, "trajectories"), exist_ok=True)
+        kept, rejected = [], []
+        print("Meta-TAF: cold start (metaConsumeSources=false); not using any population models.", flush=True)
+    else:
+        kept, rejected = validate_and_stage_sources(source_dir, staging_dir)
     if kept:
         print(f"Meta-TAF: using {len(kept)} population model(s): {kept}", flush=True)
-    elif META_REQUIRE_SOURCES:
+    elif META_CONSUME_SOURCES and META_REQUIRE_SOURCES:
         detail = ""
         if rejected:
             detail = "\nRejected candidate(s):\n" + "\n".join(f"    - {r}" for r in rejected)
@@ -584,7 +635,7 @@ def meta_execute(conn, seed, iterations, initial_samples):
             "genuinely intended, disable 'Meta Require Sources' in the BoForUnityManager "
             "Inspector." + detail
         )
-    else:
+    elif META_CONSUME_SOURCES:
         print(
             "Meta-TAF: no valid population models found; running plain multi-objective "
             "BO (qLogNEHVI) because 'Meta Require Sources' is disabled.",
@@ -670,6 +721,7 @@ def main():
     global PROBLEM_DIM, NUM_OBJS
     global META_SOURCE_DIR, META_REQUIRE_SOURCES, META_WEIGHT_MODE, META_RHO, META_TARGET_WEIGHT
     global META_WARMUP_ITERS, META_DECAY_START_ITER, META_DECAY_RATE
+    global META_CONSUME_SOURCES, META_EXPORT_SOURCE, META_EXPORT_NAME
     global USER_ID, CONDITION_ID, GROUP_ID, USER_LOG_ID, CONDITION_LOG_ID
     global parameter_names, objective_names, parameters_info, objectives_info, FRAME
     global SOCKET_RECV_BUF
@@ -734,6 +786,9 @@ def main():
         META_WARMUP_ITERS     = get_cfg_int(cfg, "metaWarmupIters", default=META_WARMUP_ITERS)
         META_DECAY_START_ITER = get_cfg_int(cfg, "metaDecayStartIter", default=META_DECAY_START_ITER)
         META_DECAY_RATE       = get_cfg_float(cfg, "metaDecayRate", default=META_DECAY_RATE)
+        META_CONSUME_SOURCES  = get_cfg_bool(cfg, "metaConsumeSources", default=META_CONSUME_SOURCES)
+        META_EXPORT_SOURCE    = get_cfg_bool(cfg, "metaExportSource", default=META_EXPORT_SOURCE)
+        META_EXPORT_NAME      = str(cfg.get("metaExportName") or "").strip()
 
         if PROBLEM_DIM < 1:
             raise ValueError(f"nParameters must be >= 1, got {PROBLEM_DIM}")
@@ -831,7 +886,12 @@ def main():
             FRAME_DIGEST=meta_fingerprint.frame_digest(FRAME),
         ), flush=True)
 
-        meta_execute(conn, SEED, N_ITERATIONS, N_INITIAL)
+        _hvs, x_all, y_all = meta_execute(conn, SEED, N_ITERATIONS, N_INITIAL)
+
+        # A source environment (Vol7/FCG) writes itself as a population model for the transfer
+        # target (Vol6). Done after optimization_finished so it never delays the participant loop.
+        if META_EXPORT_SOURCE:
+            export_run_as_source(x_all, y_all)
     finally:
         if conn is not None:
             try:

@@ -161,6 +161,15 @@ namespace BOforUnity
         [Min(0)] public int metaDecayStartIter = 2;
         [Range(0f, 1f)] public float metaDecayRate = 0.3f;
 
+        // Automatic source-transfer pipeline (driven per-scene by WayfindingTrialRunner, so no
+        // offline meta_train.py step is needed). A "source" environment (Vol7, FCG) cold-starts
+        // (metaConsumeSources = false) and writes itself as a population model on completion
+        // (metaExportSource = true). The transfer target (Vol6) consumes those models
+        // (metaConsumeSources = true, metaExportSource = false).
+        public bool metaConsumeSources = true;   // load/use population models for the acquisition
+        public bool metaExportSource = false;    // export this run as a population model when it finishes
+        public string metaExportName = "";       // artifact name (default: <user>_<condition>)
+
         // Dynamic BO settings; only read when optimizerBackend == DBO. The fitted
         // decay rate alpha is logged per iteration to DboDiagnosticsPerEvaluation.csv —
         // if it stays near 1.0 for a whole run, the objective did not measurably

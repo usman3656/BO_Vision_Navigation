@@ -10,14 +10,18 @@ namespace RouteNavigation
     /// <summary>
     /// Drives the whole wayfinding-path study in ONE continuous scene (no per-trial scene reload).
     /// It uses the scene's OWN first-person player (e.g. Vol.7's FirstPersonAIO) so we don't fight its
-    /// camera or controller. Each trial it:
-    ///   1. reads the 6 chosen parameters (R,G,B,Opacity,Size,Height, 0..1) and paints the path,
-    ///   2. teleports the player to Start and lets them walk to Goal (timed),
-    ///   3. pauses the player and asks for a 1..20 look rating (on-screen),
-    ///   4. submits both objectives (WalkTime, Aesthetics) and waits for the optimizer's next parameters.
+    /// camera or controller.
+    ///
+    /// OPTIMISE environments (Vol.7, FCG): each trial reads the 6 chosen parameters (R,G,B,Opacity,Size,
+    /// Height, 0..1), paints the path, times the walk, then asks two 1..10 ratings that genuinely trade off,
+    /// Aesthetic (fits the surroundings) and EasyToFollow (attention-grabbing), and submits both as objectives.
+    /// Walk time is still logged as a side measure but is not an objective.
+    ///
+    /// TRANSFER TARGET (Vol.6): no optimiser. ValidationLoop presents the parameter sets transferred from the
+    /// participant's own Vol.7 + FCG fronts (closer / distant / interpolation) and measures each.
     ///
     /// The player is auto-found (any component whose type is named "FirstPersonAIO"). For scenes without
-    /// one (e.g. FCG) assign a DesktopWalkController in the Walker slot instead.
+    /// one (e.g. FCG, Vol.6) a DesktopWalkController is spawned automatically.
     /// </summary>
     public class WayfindingTrialRunner : MonoBehaviour
     {
@@ -43,15 +47,19 @@ namespace RouteNavigation
         [Header("Tuning")]
         [Tooltip("XZ distance to the goal (metres) that counts as arrived.")]
         public float arriveRadius = 2f;
-        public string walkTimeKey = "WalkTime";
-        public string aestheticsKey = "Aesthetics";
+        // The two objectives that genuinely trade off (a real Pareto front): a cue that blends into the
+        // surroundings cannot also be maximally attention-grabbing. Both are 1..10, both MAXIMISED.
+        public string aestheticKey = "Aesthetic";     // does the guidance go well with the surroundings
+        public string easyKey = "EasyToFollow";       // how attention-grabbing / easy to follow it is
 
         private BoForUnityManager _bo;
         private bool _awaitingStart;
         private bool _startPressed;
         private bool _awaitingRating;
         private bool _ratingConfirmed;
-        private int _rating = 5;
+        private int _ratingAesthetic = 5;
+        private int _ratingEasy = 5;
+        private bool _validationMode;   // Vol.6 (transfer target): present transferred params, no optimiser
         private string _status = "Starting up...";
         private int _trial;
 
@@ -72,22 +80,29 @@ namespace RouteNavigation
         {
             conditionId = ConditionForScene(SceneManager.GetActiveScene().name, conditionId);
 
-            _bo = FindAnyObjectByType<BoForUnityManager>();
-            if (_bo == null)
+            // Vol.6 is the TRANSFER TARGET: it is not optimised. It presents the parameters transferred from
+            // the participant's own Vol.7 + FCG fronts and just measures them, so it needs no optimiser/Python.
+            _validationMode = string.Equals(conditionId, "Vol6", System.StringComparison.OrdinalIgnoreCase);
+
+            if (!_validationMode)
             {
-                // No manager saved in this scene (e.g. the Vol.7 scene has markers+runner but no manager):
-                // spawn one from Resources so the study still runs on a plain Play. Self-healing = never
-                // depends on the BO manager being saved in the scene.
-                var prefab = Resources.Load<GameObject>("BOforUnityManager");
-                if (prefab != null)
+                _bo = FindAnyObjectByType<BoForUnityManager>();
+                if (_bo == null)
                 {
-                    var go = Instantiate(prefab);
-                    go.name = "BOforUnityManager";
-                    _bo = go.GetComponentInChildren<BoForUnityManager>(true);
+                    // No manager saved in this scene (e.g. the Vol.7 scene has markers+runner but no manager):
+                    // spawn one from Resources so the study still runs on a plain Play. Self-healing = never
+                    // depends on the BO manager being saved in the scene.
+                    var prefab = Resources.Load<GameObject>("BOforUnityManager");
+                    if (prefab != null)
+                    {
+                        var go = Instantiate(prefab);
+                        go.name = "BOforUnityManager";
+                        _bo = go.GetComponentInChildren<BoForUnityManager>(true);
+                    }
+                    if (_bo == null) _bo = FindAnyObjectByType<BoForUnityManager>();
                 }
-                if (_bo == null) _bo = FindAnyObjectByType<BoForUnityManager>();
+                if (_bo != null) ConfigureManager(_bo); // full config at runtime, before the manager's Start() -> no menus needed
             }
-            if (_bo != null) ConfigureManager(_bo); // full config at runtime, before the manager's Start() -> no menus needed
 
             // Self-wire any missing references so the runner works even if Build didn't connect them.
             if (path == null) path = FindAnyObjectByType<WayfindingPathController>();
@@ -115,7 +130,9 @@ namespace RouteNavigation
             }
             EnsurePlayerCamera();                                       // make the active player's camera the only one rendering
             if (playerController != null) playerController.enabled = true;
-            StartCoroutine(RunLoop());
+
+            if (_validationMode) StartCoroutine(ValidationLoop());
+            else StartCoroutine(RunLoop());
         }
 
         /// <summary>Makes a marker's PIVOT coincide with its VISIBLE sphere child, then re-centers the sphere
@@ -219,22 +236,17 @@ namespace RouteNavigation
                     walkSeconds = walker.ElapsedSeconds;
                 }
 
-                // (3) Pause the player and rate the look, 1..20.
+                // (3) Pause the player and rate the two objectives (both 1..10).
                 if (useFps && playerController != null) playerController.enabled = false;
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
-                _rating = 5;
-                _ratingConfirmed = false;
-                _awaitingRating = true;
-                while (!_ratingConfirmed) yield return null;
-                _awaitingRating = false;
-                int aesthetics = _rating;
+                yield return AskTwoRatings();
+                int aesthetic = _ratingAesthetic;
+                int easy = _ratingEasy;
                 if (useFps && playerController != null) playerController.enabled = true;
 
                 // (4) Submit both objectives and wait for the optimizer's next parameters.
-                AddObjectiveByKey(walkTimeKey, walkSeconds);
-                AddObjectiveByKey(aestheticsKey, aesthetics);
-                AppendMasterRow(_trial, r, g, b, opacity, size, height, walkSeconds, aesthetics);
+                AddObjectiveByKey(aestheticKey, aesthetic);
+                AddObjectiveByKey(easyKey, easy);
+                AppendMasterRow(_trial, r, g, b, opacity, size, height, walkSeconds, aesthetic, easy);
                 _status = "Submitted. The optimizer is thinking...";
                 int iterationBefore = _bo.currentIteration;
                 _bo.OptimizationStart();
@@ -246,6 +258,123 @@ namespace RouteNavigation
             }
 
             _status = "Study complete. Thank you!";
+        }
+
+        /// <summary>Frees the cursor, resets both ratings, and waits for the participant to confirm the
+        /// two 1..10 ratings on screen (Aesthetic fit + EasyToFollow). Shared by the study and transfer loops.</summary>
+        private IEnumerator AskTwoRatings()
+        {
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            _ratingAesthetic = 5;
+            _ratingEasy = 5;
+            _ratingConfirmed = false;
+            _awaitingRating = true;
+            while (!_ratingConfirmed) yield return null;
+            _awaitingRating = false;
+        }
+
+        /// <summary>Vol.6 transfer test: no optimiser. Presents the parameter sets transferred from the
+        /// participant's own Vol.7 + FCG fronts (closer, distant, interpolation at three tradeoff levels) and
+        /// measures each. Success is read from the results: does the closer source beat the distant one, and is
+        /// the interpolation at least as good as the better single source.</summary>
+        private IEnumerator ValidationLoop()
+        {
+            if (path == null || startPoint == null || goalPoint == null)
+            {
+                Debug.LogError("[Transfer] Assign path, startPoint and goalPoint."); yield break;
+            }
+            bool useFps = playerRoot != null;
+            if (!useFps && walker == null) { Debug.LogError("[Transfer] No player found."); yield break; }
+
+            if (useFps) { EnsurePlayerCamera(); TeleportPlayer(startPoint.position); }
+
+            // START gate collects the participant ID; their own Vol.7 + FCG data drives the transfer.
+            if (useFps && playerController != null) playerController.enabled = false;
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            _startPressed = false;
+            _awaitingStart = true;
+            _status = "Transfer test. Enter the Participant ID (same as their Vol.7 + FCG runs) and press START.";
+            while (!_startPressed) yield return null;
+            _awaitingStart = false;
+
+            var candidates = EmbeddingTransfer.BuildCandidates(participantId, conditionId, out string err);
+            if (candidates == null || candidates.Count == 0)
+            {
+                _status = "Transfer test could not start: " + (err ?? "no candidates.");
+                Debug.LogError("[Transfer] " + _status);
+                yield break;
+            }
+
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                var c = candidates[i];
+                _trial = i + 1;
+
+                path.RebuildRoute();
+                path.ApplyParameters(c.r, c.g, c.b, c.opacity, c.size, c.height);
+
+                float walkSeconds;
+                _status = $"Transfer {_trial}/{candidates.Count} ({c.kind}, λ={c.lambda:F2}): walk to the RED goal.";
+                if (useFps)
+                {
+                    TeleportPlayer(startPoint.position);
+                    if (playerController != null) playerController.enabled = true;
+                    EnsurePlayerCamera();
+                    Cursor.lockState = CursorLockMode.Locked;
+                    Cursor.visible = false;
+                    yield return WalkFps();
+                    walkSeconds = _lastWalkSeconds;
+                }
+                else
+                {
+                    walker.ResetTo(startPoint);
+                    EnsurePlayerCamera();
+                    walker.Begin(goalPoint);
+                    while (!walker.Finished) yield return null;
+                    walkSeconds = walker.ElapsedSeconds;
+                }
+
+                if (useFps && playerController != null) playerController.enabled = false;
+                yield return AskTwoRatings();
+                int aesthetic = _ratingAesthetic;
+                int easy = _ratingEasy;
+                if (useFps && playerController != null) playerController.enabled = true;
+
+                AppendMasterRow(_trial, c.r, c.g, c.b, c.opacity, c.size, c.height, walkSeconds, aesthetic, easy);
+                AppendValidationRow(c, walkSeconds, aesthetic, easy);
+            }
+
+            _status = "Transfer test complete. Thank you!";
+        }
+
+        /// <summary>Logs one transfer candidate (with its kind, tradeoff level, and predicted vs actual
+        /// objectives) to a dedicated CSV for the transfer analysis.</summary>
+        private void AppendValidationRow(EmbeddingTransfer.Candidate c, float walkSeconds, int aesthetic, int easy)
+        {
+            try
+            {
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                string dir = System.IO.Path.Combine(Application.streamingAssetsPath, "BOData", "LogData");
+                System.IO.Directory.CreateDirectory(dir);
+                string file = System.IO.Path.Combine(dir, "TransferValidation.csv");
+                if (!System.IO.File.Exists(file))
+                    System.IO.File.AppendAllText(file,
+                        "Timestamp;Participant;Condition;Trial;Kind;Lambda;ActualAesthetic;ActualEasyToFollow;" +
+                        "PredAesthetic;PredEasyToFollow;WalkTimeSeconds;R;G;B;Opacity;Size;Height\n");
+                string row = string.Format(inv,
+                    "{0};{1};{2};{3};{4};{5:F2};{6};{7};{8:F2};{9:F2};{10:F3};{11:F3};{12:F3};{13:F3};{14:F3};{15:F3};{16:F3}\n",
+                    System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                    participantId, conditionId, _trial, c.kind, c.lambda, aesthetic, easy,
+                    c.predAesthetic, c.predEasy, walkSeconds, c.r, c.g, c.b, c.opacity, c.size, c.height);
+                System.IO.File.AppendAllText(file, row);
+                Debug.Log($"[Transfer] Logged {c.kind} (λ={c.lambda:F2}) for {participantId}.");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning("[Transfer] Could not write TransferValidation.csv: " + e.Message);
+            }
         }
 
         private float _lastWalkSeconds;
@@ -345,9 +474,13 @@ namespace RouteNavigation
                 if (o?.value?.values != null) o.value.values.Clear();
         }
 
+        internal const string MasterHeader =
+            "Timestamp;Participant;Condition;Trial;WalkTimeSeconds;Aesthetic;EasyToFollow;R;G;B;Opacity;Size;Height";
+
         /// <summary>Appends ONE row per trial (all participants) to a single master CSV:
-        /// Assets/StreamingAssets/BOData/LogData/AllTrials_master.csv</summary>
-        private void AppendMasterRow(int trial, float r, float g, float b, float op, float sz, float ht, float walkSeconds, int aesthetics)
+        /// Assets/StreamingAssets/BOData/LogData/AllTrials_master.csv. Walk time is still logged as a side
+        /// measure; the two OBJECTIVES are Aesthetic and EasyToFollow.</summary>
+        private void AppendMasterRow(int trial, float r, float g, float b, float op, float sz, float ht, float walkSeconds, int aesthetic, int easyToFollow)
         {
             try
             {
@@ -356,12 +489,11 @@ namespace RouteNavigation
                 System.IO.Directory.CreateDirectory(dir);
                 string file = System.IO.Path.Combine(dir, "AllTrials_master.csv");
                 if (!System.IO.File.Exists(file))
-                    System.IO.File.AppendAllText(file,
-                        "Timestamp;Participant;Condition;Trial;WalkTimeSeconds;Aesthetics;R;G;B;Opacity;Size;Height\n");
+                    System.IO.File.AppendAllText(file, MasterHeader + "\n");
                 string row = string.Format(inv,
-                    "{0};{1};{2};{3};{4:F3};{5};{6:F3};{7:F3};{8:F3};{9:F3};{10:F3};{11:F3}\n",
+                    "{0};{1};{2};{3};{4:F3};{5};{6};{7:F3};{8:F3};{9:F3};{10:F3};{11:F3};{12:F3}\n",
                     System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                    participantId, conditionId, trial, walkSeconds, aesthetics, r, g, b, op, sz, ht);
+                    participantId, conditionId, trial, walkSeconds, aesthetic, easyToFollow, r, g, b, op, sz, ht);
                 System.IO.File.AppendAllText(file, row);
                 Debug.Log($"[Trial] Appended trial {trial} for {participantId} to master CSV.");
             }
@@ -390,10 +522,13 @@ namespace RouteNavigation
                 new ParameterEntry("Size",    new ParameterArgs(0f, 1f)),
                 new ParameterEntry("Height",  new ParameterArgs(0f, 1f)),
             };
+            // Two MAXIMISED objectives that genuinely trade off (guaranteed Pareto front): blending into the
+            // surroundings vs grabbing attention. Walk time is no longer an objective (it barely varied and
+            // was confounded by the learning effect); it is still logged as a side measure.
             bo.objectives = new List<ObjectiveEntry>
             {
-                new ObjectiveEntry("WalkTime",   new ObjectiveArgs(0f, 60f, true, 1)),
-                new ObjectiveEntry("Aesthetics", new ObjectiveArgs(1f, 10f, false, 1)),
+                new ObjectiveEntry("Aesthetic",    new ObjectiveArgs(1f, 10f, false, 1)),
+                new ObjectiveEntry("EasyToFollow", new ObjectiveArgs(1f, 10f, false, 1)),
             };
 
             bo.numSamplingIterations = 14;
@@ -497,26 +632,34 @@ namespace RouteNavigation
             if (_awaitingRating)
             {
                 float w = Mathf.Min(1000f, Screen.width * 0.95f);
-                float h = 360f;
+                float h = 470f;
                 var box = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
                 GUI.Box(box, GUIContent.none);
 
-                var title = new GUIStyle(GUI.skin.label) { fontSize = 30, alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, wordWrap = true };
-                var bigNum = new GUIStyle(GUI.skin.label) { fontSize = 90, alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
-                var numBtn = new GUIStyle(GUI.skin.button) { fontSize = 30, fontStyle = FontStyle.Bold };
-                var confirmBtn = new GUIStyle(GUI.skin.button) { fontSize = 30, fontStyle = FontStyle.Bold };
+                var title = new GUIStyle(GUI.skin.label) { fontSize = 24, alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, wordWrap = true };
+                var numBtn = new GUIStyle(GUI.skin.button) { fontSize = 24, fontStyle = FontStyle.Bold };
+                var confirmBtn = new GUIStyle(GUI.skin.button) { fontSize = 28, fontStyle = FontStyle.Bold };
 
                 GUILayout.BeginArea(new Rect(box.x + 24f, box.y + 18f, w - 48f, h - 36f));
-                GUILayout.Label("Rate how this path LOOKS    (1 = ugly,  10 = beautiful)", title);
-                GUILayout.Label(_rating.ToString(), bigNum);
 
+                // Objective 1: aesthetic fit with the surroundings.
+                GUILayout.Label($"Does the guidance fit the surroundings?   (1 = clashes,  10 = blends in)   [{_ratingAesthetic}]", title);
                 GUILayout.BeginHorizontal();
                 for (int n = 1; n <= 10; n++)
-                    if (GUILayout.Button(n.ToString(), numBtn, GUILayout.Height(66f))) _rating = n;
+                    if (GUILayout.Button(n.ToString(), numBtn, GUILayout.Height(60f))) _ratingAesthetic = n;
                 GUILayout.EndHorizontal();
 
-                GUILayout.Space(14f);
-                if (GUILayout.Button("CONFIRM  (score " + _rating + ")", confirmBtn, GUILayout.Height(70f)))
+                GUILayout.Space(16f);
+
+                // Objective 2: how easy to follow / attention-grabbing.
+                GUILayout.Label($"How easy to follow / attention-grabbing?   (1 = easy to miss,  10 = impossible to miss)   [{_ratingEasy}]", title);
+                GUILayout.BeginHorizontal();
+                for (int n = 1; n <= 10; n++)
+                    if (GUILayout.Button(n.ToString(), numBtn, GUILayout.Height(60f))) _ratingEasy = n;
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(16f);
+                if (GUILayout.Button($"CONFIRM   (fit {_ratingAesthetic}, follow {_ratingEasy})", confirmBtn, GUILayout.Height(66f)))
                     _ratingConfirmed = true;
                 GUILayout.EndArea();
             }

@@ -16,8 +16,9 @@ namespace RouteNavigation
     ///   2. Read the per-environment ViT embeddings and weight the two sources by cosine similarity to the
     ///      target (closer environment counts more).
     ///   3. At three matched tradeoff levels (favour-follow, balanced, favour-aesthetic) take each source's
-    ///      best point and produce three candidates: the CLOSER source's solution, the DISTANT source's
-    ///      solution, and their embedding-weighted INTERPOLATION.
+    ///      best point and produce four candidates: the CLOSER source's solution, the DISTANT source's
+    ///      solution, the raw-average INTERPOLATION (interp_raw, kept for comparison), and the coherent
+    ///      colour-space INTERPOLATION (interp_ridge).
     ///
     /// Professor's success test then reads directly from the results: does the closer source beat the distant
     /// one, and is the interpolation at least as good as the better single source.
@@ -38,7 +39,7 @@ namespace RouteNavigation
 
         public class Candidate
         {
-            public string kind;      // "closer", "distant", or "interp"
+            public string kind;      // "closer", "distant", "interp_raw", or "interp_ridge"
             public float lambda;     // tradeoff level this candidate was formed at
             public float r, g, b, opacity, size, height;
             public float predAesthetic;   // expected Aesthetic (source value, or weighted blend)
@@ -51,8 +52,8 @@ namespace RouteNavigation
             public float[] p;   // 6 params in order R,G,B,Opacity,Size,Height
         }
 
-        /// <summary>Builds the 9 candidates (3 tradeoff levels x {closer, distant, interp}) for one participant.
-        /// Returns null with an explanation in <paramref name="error"/> if the source data is missing.</summary>
+        /// <summary>Builds the 12 candidates (3 tradeoff levels x {closer, distant, interp_raw, interp_ridge})
+        /// for one participant. Returns null with an explanation in <paramref name="error"/> if source data is missing.</summary>
         public static List<Candidate> BuildCandidates(string participantId, string targetCondition, out string error)
         {
             error = null;
@@ -112,11 +113,20 @@ namespace RouteNavigation
                 candidates.Add(MakeCandidate("closer", lambda, pc.p, pc.aesthetic, pc.easy));
                 candidates.Add(MakeCandidate("distant", lambda, pd.p, pd.aesthetic, pd.easy));
 
-                var ip = new float[6];
-                for (int j = 0; j < 6; j++) ip[j] = Mathf.Clamp01(wCloser * pc.p[j] + wDistant * pd.p[j]);
-                candidates.Add(MakeCandidate("interp", lambda, ip,
-                    wCloser * pc.aesthetic + wDistant * pd.aesthetic,
-                    wCloser * pc.easy + wDistant * pd.easy));
+                // Predicted objectives = embedding-weighted blend of the two matched points (a rough estimate).
+                float predAes = wCloser * pc.aesthetic + wDistant * pd.aesthetic;
+                float predEasy = wCloser * pc.easy + wDistant * pd.easy;
+
+                // interp_raw: the OLD blend that averages the six parameters directly, kept for the before/after
+                // comparison. Averaging the RGB numbers is exactly what produces the grey "mud" middle.
+                var ipRaw = new float[6];
+                for (int j = 0; j < 6; j++) ipRaw[j] = Mathf.Clamp01(wCloser * pc.p[j] + wDistant * pd.p[j]);
+                candidates.Add(MakeCandidate("interp_raw", lambda, ipRaw, predAes, predEasy));
+
+                // interp_ridge: the coherent blend, mix the COLOUR in HSV (so blue+orange never collapses to
+                // grey) and average only the scalar knobs (opacity, size, height). Stays a real, plausible arrow.
+                var ipRidge = RidgeBlend(pc.p, pd.p, wCloser);
+                candidates.Add(MakeCandidate("interp_ridge", lambda, ipRidge, predAes, predEasy));
             }
 
             if (candidates.Count == 0) { error = "no candidates could be formed (empty source fronts)"; return null; }
@@ -133,6 +143,36 @@ namespace RouteNavigation
                 r = p[0], g = p[1], b = p[2], opacity = p[3], size = p[4], height = p[5],
                 predAesthetic = predAesth, predEasy = predEasy,
             };
+        }
+
+        /// <summary>Coherent "ridge" blend: mix the COLOUR in HSV (hue on the shortest arc, so blue + orange
+        /// never collapses to grey mud) and average only the scalar knobs (opacity, size, height) linearly.
+        /// Keeps the blended arrow a real, plausible setting instead of a valley point between two hilltops.
+        /// wa is the weight on the CLOSER source's parameters <paramref name="a"/>.</summary>
+        private static float[] RidgeBlend(float[] a, float[] b, float wa)
+        {
+            float wb = 1f - wa;
+            Color.RGBToHSV(new Color(Mathf.Clamp01(a[0]), Mathf.Clamp01(a[1]), Mathf.Clamp01(a[2])), out float ha, out float sa, out float va);
+            Color.RGBToHSV(new Color(Mathf.Clamp01(b[0]), Mathf.Clamp01(b[1]), Mathf.Clamp01(b[2])), out float hb, out float sb, out float vb);
+            float h = BlendHueShortest(ha, hb, wa);
+            float s = wa * sa + wb * sb;
+            float v = wa * va + wb * vb;
+            Color m = Color.HSVToRGB(Mathf.Repeat(h, 1f), Mathf.Clamp01(s), Mathf.Clamp01(v));
+            return new float[]
+            {
+                Mathf.Clamp01(m.r), Mathf.Clamp01(m.g), Mathf.Clamp01(m.b),
+                Mathf.Clamp01(wa * a[3] + wb * b[3]),   // opacity
+                Mathf.Clamp01(wa * a[4] + wb * b[4]),   // size
+                Mathf.Clamp01(wa * a[5] + wb * b[5]),   // height
+            };
+        }
+
+        /// <summary>Interpolate hue around the colour wheel along the SHORTER arc; result weighted wa toward h1.</summary>
+        private static float BlendHueShortest(float h1, float h2, float wa)
+        {
+            float diff = h2 - h1;
+            if (diff > 0.5f) diff -= 1f; else if (diff < -0.5f) diff += 1f;
+            return Mathf.Repeat(h1 + (1f - wa) * diff, 1f);
         }
 
         // --- data reading -----------------------------------------------------
